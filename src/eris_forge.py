@@ -1,8 +1,7 @@
 import logging
 import random
-from typing import List, Tuple, Dict
+from typing import List, Dict
 
-import math
 import torch
 from torch import Tensor
 from tqdm import tqdm
@@ -95,7 +94,13 @@ class Forge:
             output_hidden_states=True,
         )
 
-    def compute_positive_direction(self,model: AutoModelForCausalLM | str,  positive_behaviour_tokenized_instructions: List[Tensor], negative_behaviour_instructions: List[Tensor]):
+    def compute_positive_direction(
+            self,
+            model: AutoModelForCausalLM | str,
+            positive_behaviour_tokenized_instructions: List[Tensor],
+            negative_behaviour_instructions: List[Tensor],
+            layer: str | int,
+    ) -> Tensor:
         if isinstance(model, str):
             logging.info(f"Loading model from {model}")
             model: AutoModelForCausalLM  = AutoModelForCausalLM.from_pretrained(
@@ -107,17 +112,61 @@ class Forge:
         else:
             model.to(self.device)
 
+        if isinstance(layer, str):
+            if layer == "auto":
+                layer = int(len(model.model.layers) * 0.6)
+                logging.info(f"Using layer {layer} for computing positive direction.")
+            elif layer=="best":
+                logging.info("Searching for best layer for computing positive direction.")
+                raise NotImplementedError("Search of best layer not implemented yet.")
+            else:
+                raise ValueError(f"Invalid layer value: {layer}, must be 'auto', 'best' or an integer.")
+        else:
+            logging.info(f"Using layer {layer} for computing positive direction.")
 
+        logging.info("Generating tokens on positive instructions.")
+        with tqdm(total=len(positive_behaviour_tokenized_instructions), desc="Generating tokens on positive instructions") as bar:
+            positive_outputs = [
+                self._generate_new_tok(model, positive_behaviour_tokenized_instruction, bar)
+                for positive_behaviour_tokenized_instruction in positive_behaviour_tokenized_instructions
+            ]
+        logging.info('Completed generating tokens on positive instructions.')
 
+        logging.info("Generating tokens on negative instructions.")
+        with tqdm(total=len(negative_behaviour_instructions), desc="Generating tokens on negative instructions") as bar:
+            negative_outputs = [
+                self._generate_new_tok(model, negative_behaviour_instruction, bar)
+                for negative_behaviour_instruction in negative_behaviour_instructions
+            ]
+        logging.info('Completed generating tokens on negative instructions.')
 
+        logging.info("Computing positive direction.")
+        positive_mean = torch.stack([output.hidden_states[0][layer][:, -1, :] for output in positive_outputs]).mean(dim=0)
+        negative_mean = torch.stack([output.hidden_states[0][layer][:, -1, :] for output in negative_outputs]).mean(dim=0)
+
+        positive_dir = positive_mean - negative_mean
+        positive_dir = positive_dir / positive_dir.norm()
+
+        return positive_dir
 
 
 if __name__ == "__main__":
+    MODEL = 'google/gemma-1.1-2b-it'
+    with open("harmful.txt", "r") as f:
+        pos = f.readlines()
+
+    with open("harmless.txt", "r") as f:
+        neg = f.readlines()
+
     logging.basicConfig(level=logging.INFO)
     forge = Forge()
-    l_pos = ["positive 1"] * 100
-    l_neg = ["negative 1"] * 100
-    forge.load_instructions(positive_behaviour_instructions=l_pos, negative_behaviour_instructions=l_neg)
-    tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2-7B-Instruct")
-    d_toks = forge.tokenize_instructions(tokenizer=tokenizer)
-    print(d_toks)
+    forge.load_instructions(positive_behaviour_instructions=pos, negative_behaviour_instructions=neg)
+    tokenizer = AutoTokenizer.from_pretrained(MODEL, trust_remote_code=True)
+    d_toks = forge.tokenize_instructions(tokenizer=tokenizer, max_n_negative_instruction=100, max_n_positive_instruction=100)
+
+    refusal_dir = forge.compute_positive_direction(
+        model=MODEL,
+        positive_behaviour_tokenized_instructions=d_toks['positive_tokens'],
+        negative_behaviour_instructions=d_toks['negative_tokens'],
+        layer="auto"
+    )
