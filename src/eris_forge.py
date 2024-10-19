@@ -84,12 +84,12 @@ class Forge:
             'negative_tokens': negative_instr_tokens
         }
 
-    def _generate_new_tok(self, model: AutoModelForCausalLM, tokens: Tensor, bar: tqdm):
+    def _generate_new_tok(self, model: AutoModelForCausalLM, tokens: Tensor, bar: tqdm, n_generated_tokens: int = 1) -> Dict[str, Tensor]:
         bar.update(n=1)
         return model.generate(
             tokens.to(self.device),
             use_cache=False,
-            max_new_tokens=1,
+            max_new_tokens=10,
             return_dict_in_generate=True,
             output_hidden_states=True,
         )
@@ -100,6 +100,8 @@ class Forge:
             positive_behaviour_tokenized_instructions: List[Tensor],
             negative_behaviour_instructions: List[Tensor],
             layer: str | int,
+            layer_range: List[int] | None = None,
+            tokenizer: PreTrainedTokenizerBase | AutoTokenizer | str | None = None,
     ) -> Tensor:
         if isinstance(model, str):
             logging.info(f"Loading model from {model}")
@@ -115,9 +117,10 @@ class Forge:
         if isinstance(layer, str):
             if layer == "auto":
                 layer = int(len(model.model.layers) * 0.6)
-                logging.info(f"Using layer {layer} for computing positive direction.")
+                logging.info(f"Using layer {layer} (out of {len(model.model.layers)} layers) for computing positive direction.")
             elif layer=="best":
                 logging.info("Searching for best layer for computing positive direction.")
+                logging.warning("Warning: this operation can be extremely slow. You can specify a range of layers to speed up the process.")
                 raise NotImplementedError("Search of best layer not implemented yet.")
             else:
                 raise ValueError(f"Invalid layer value: {layer}, must be 'auto', 'best' or an integer.")
@@ -127,7 +130,12 @@ class Forge:
         logging.info("Generating tokens on positive instructions.")
         with tqdm(total=len(positive_behaviour_tokenized_instructions), desc="Generating tokens on positive instructions") as bar:
             positive_outputs = [
-                self._generate_new_tok(model, positive_behaviour_tokenized_instruction, bar)
+                self._generate_new_tok(
+                    model=model,
+                    tokens=positive_behaviour_tokenized_instruction,
+                    bar=bar,
+                    n_generated_tokens= 10 if tokenizer else 1,
+                )
                 for positive_behaviour_tokenized_instruction in positive_behaviour_tokenized_instructions
             ]
         logging.info('Completed generating tokens on positive instructions.')
@@ -135,10 +143,25 @@ class Forge:
         logging.info("Generating tokens on negative instructions.")
         with tqdm(total=len(negative_behaviour_instructions), desc="Generating tokens on negative instructions") as bar:
             negative_outputs = [
-                self._generate_new_tok(model, negative_behaviour_instruction, bar)
+                self._generate_new_tok(
+                    model=model,
+                    tokens=negative_behaviour_instruction,
+                    bar=bar,
+                    n_generated_tokens= 10 if tokenizer else 1,
+                )
                 for negative_behaviour_instruction in negative_behaviour_instructions
             ]
         logging.info('Completed generating tokens on negative instructions.')
+
+        if tokenizer: # Print the generated text, use this for evaluation, to be reorganized in well strucutred and generic code.
+            token_ids = positive_outputs[0]['sequences']
+            print(f"token_ids structure: {token_ids}")
+            print(f"First item in token_ids: {token_ids[0]}")
+            if isinstance(token_ids[0], list):
+                token_ids = [item for sublist in token_ids for item in sublist]
+            token_ids_list = token_ids.squeeze(0).tolist()  # Remove the outer dimension and convert to list
+            pos_generated_text = tokenizer.decode(token_ids_list, skip_special_tokens=True)
+            print(pos_generated_text)
 
         logging.info("Computing positive direction.")
         positive_mean = torch.stack([output.hidden_states[0][layer][:, -1, :] for output in positive_outputs]).mean(dim=0)
@@ -157,16 +180,17 @@ if __name__ == "__main__":
 
     with open("harmless.txt", "r") as f:
         neg = f.readlines()
-
+    max_inst = 1
     logging.basicConfig(level=logging.INFO)
     forge = Forge()
     forge.load_instructions(positive_behaviour_instructions=pos, negative_behaviour_instructions=neg)
     tokenizer = AutoTokenizer.from_pretrained(MODEL, trust_remote_code=True)
-    d_toks = forge.tokenize_instructions(tokenizer=tokenizer, max_n_negative_instruction=100, max_n_positive_instruction=100)
+    d_toks = forge.tokenize_instructions(tokenizer=tokenizer, max_n_negative_instruction=max_inst, max_n_positive_instruction=max_inst)
 
     refusal_dir = forge.compute_positive_direction(
         model=MODEL,
         positive_behaviour_tokenized_instructions=d_toks['positive_tokens'],
         negative_behaviour_instructions=d_toks['negative_tokens'],
-        layer="auto"
+        layer="auto",
+        tokenizer=tokenizer
     )
