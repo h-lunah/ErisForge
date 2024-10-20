@@ -6,7 +6,7 @@ import jaxtyping
 import torch
 from einops import einops
 from torch import Tensor, nn
-from tqdm import tqdm
+from tqdm import tqdm, trange
 from transformers import AutoTokenizer, PreTrainedTokenizerBase, AutoModelForCausalLM, TextStreamer
 from transformers.generation import GenerateDecoderOnlyOutput
 
@@ -89,15 +89,29 @@ class Forge:
             'negative_tokens': negative_instr_tokens
         }
 
-    def _generate_new_tok(self, model: AutoModelForCausalLM, tokens: Tensor, bar: tqdm, n_generated_tokens: int = 1) -> GenerateDecoderOnlyOutput:
-        bar.update(n=1)
-        return model.generate(
-            tokens.to(self.device),
-            use_cache=False,
-            max_new_tokens=10,
-            return_dict_in_generate=True,
-            output_hidden_states=True,
-        )
+    def _generate_new_tokens(
+            self,
+            model: AutoModelForCausalLM,
+            tokens: Tensor,
+            bar: tqdm | None = None,
+            n_generated_tokens: int = 1,
+            streamer: TextStreamer | None = None,
+    ) -> GenerateDecoderOnlyOutput:
+        if bar:
+            bar.update(n=1)
+
+        params = {
+            "inputs": tokens.to(self.device),
+            "use_cache": False,
+            "max_new_tokens": n_generated_tokens,
+            "return_dict_in_generate": True,
+            "output_hidden_states": True,
+        }
+
+        if streamer:
+            params["streamer"] = streamer
+
+        return model.generate(**params)
 
     def compute_output(
             self,
@@ -119,7 +133,7 @@ class Forge:
         logging.info("Generating tokens on positive instructions.")
         with tqdm(total=len(positive_behaviour_tokenized_instructions), desc="Generating tokens on positive instructions") as bar:
             positive_outputs = [
-                self._generate_new_tok(
+                self._generate_new_tokens(
                     model=model,
                     tokens=positive_behaviour_tokenized_instruction,
                     bar=bar,
@@ -132,7 +146,7 @@ class Forge:
         logging.info("Generating tokens on negative instructions.")
         with tqdm(total=len(negative_behaviour_tokenized_instructions), desc="Generating tokens on negative instructions") as bar:
             negative_outputs = [
-                self._generate_new_tok(
+                self._generate_new_tokens(
                     model=model,
                     tokens=negative_behaviour_instruction,
                     bar=bar,
@@ -177,21 +191,52 @@ class Forge:
         return activation - proj
 
 
-    def run_ablated_model(
+    def run_forged_model(
             self,
             model: AutoModelForCausalLM,
             refusal_dir: Tensor,
             tokenizer: PreTrainedTokenizerBase | AutoTokenizer,
-    ):
+            instructions: List[str],
+            max_new_tokens: int = 100,
+            stream: bool = False,
+    ) -> List[List[Dict[str, Any]]]:
 
-        for idx in range(len(model.model.layers)):
-            model.model.layers[idx] = AblationDecoderLayer(
-                original_layer=model.model.layers[idx],
+        for layer_idx in trange(len(model.model.layers), desc='Ablating model layers'):
+            model.model.layers[layer_idx] = AblationDecoderLayer(
+                original_layer=model.model.layers[layer_idx],
                 refusal_dir=refusal_dir,
             )
 
-        streamer = TextStreamer(tokenizer)
+        logging.info('Tokenizing instructions for newly forged model.')
+        with tqdm(total=len(instructions), desc='Tokenizing instructions for newly forged model') as bar:
+            instr_tokens: List[torch.Tensor] = [
+                self._tokenize(tokenizer=tokenizer, instruction=instruction, bar=bar)
+                for instruction in instructions
+            ]
 
+        logging.info('Generating tokens for newly forged model.')
+        with tqdm(total=len(instructions), desc='Generating tokens for newly forged model') as bar:
+            encoded_responses = [
+                self._generate_new_tokens(
+                    model=model,
+                    tokens=instr_token,
+                    bar=bar,
+                    n_generated_tokens=max_new_tokens,
+                    streamer=TextStreamer(tokenizer) if stream else None,
+                )
+                for instr_token in instr_tokens
+            ]
+
+        conversations: List[List[Dict[str, Any]]] = []
+        for enc_resp, instr in encoded_responses, instructions:
+            conversations.append(
+                [
+                    {"role": "user", "content": instr},
+                    {"role": "assistant", "content": tokenizer.batch_decode(enc_resp, skip_special_tokens=True)}
+                ]
+            )
+
+        return conversations
 
 
 if __name__ == "__main__":
