@@ -1,21 +1,22 @@
 import logging
 import random
-from typing import List, Dict, Any
+from random import sample
+from typing import List, Dict, Any, Type
 
-import jaxtyping
 import torch
-from einops import einops
 from torch import Tensor, nn
 from tqdm import tqdm, trange
-from transformers import AutoTokenizer, PreTrainedTokenizerBase, AutoModelForCausalLM, TextStreamer
+from transformers import AutoTokenizer, PreTrainedTokenizerBase, AutoModelForCausalLM, TextStreamer, PreTrainedModel
 from transformers.generation import GenerateDecoderOnlyOutput
 
-from src.layers import AblationDecoderLayer
+from src.layers import AblationDecoderLayer, AdditionDecoderLayer
+from src.scorers.base_scorer import BaseScorer
 
 
 class Forge:
 
     def __init__(self):
+        self.max_toks = 1
         self.max_iterations: int = 0
         self.positive_behaviour_instructions: List[str] = []
         self.negative_behaviour_instructions: List[str] = []
@@ -137,7 +138,7 @@ class Forge:
                     model=model,
                     tokens=positive_behaviour_tokenized_instruction,
                     bar=bar,
-                    n_generated_tokens= 10 if tokenizer else 1,
+                    n_generated_tokens=self.max_toks,
                 )
                 for positive_behaviour_tokenized_instruction in positive_behaviour_tokenized_instructions
             ]
@@ -150,7 +151,7 @@ class Forge:
                     model=model,
                     tokens=negative_behaviour_instruction,
                     bar=bar,
-                    n_generated_tokens= 10 if tokenizer else 1,
+                    n_generated_tokens=self.max_toks,
                 )
                 for negative_behaviour_instruction in negative_behaviour_tokenized_instructions
             ]
@@ -161,64 +162,179 @@ class Forge:
             'neg': negative_outputs,
         }
 
-    def compute_best_layer(
-            self,
-            model,
+    def compute_positive_metric(self):
 
+    def find_approximate_best_positive_direction(
+            self,
+            model: AutoModelForCausalLM | PreTrainedModel,
+            scorer: BaseScorer,
+            eval_positive_instructions: List[str],
+            eval_negative_instructions: List[str],
+            min_layer: int | None = None,
+            max_layer: int | None = None,
+    ) -> Tensor:
+        if min_layer is None:
+            min_layer = max(int(len(model.model.layers) * 0.2), 1)
+        if max_layer is None:
+            max_layer = min(int(len(model.model.layers) * 0.8), len(model.model.layers)-2)
+
+        score_x_layer = []
+
+        with tqdm(total=len(eval_positive_instructions), desc='Tokenizing Positive Eval Instructions set') as bar:
+            pos_toks = [
+                self._tokenize(tokenizer=tokenizer, instruction=instr, bar=bar)
+                for instr in eval_positive_instructions
+            ]
+        with tqdm(total=len(eval_negative_instructions), desc='Tokenizing Negative Eval Instructions set') as bar:
+            neg_toks = [
+                self._tokenize(tokenizer=tokenizer, instruction=instr, bar=bar)
+                for instr in eval_negative_instructions
+            ]
+
+        d_out = self.compute_output(
+            model=model,
+            positive_behaviour_tokenized_instructions=pos_toks,
+            negative_behaviour_tokenized_instructions=neg_toks,
+        )
+
+        for layer_idx in trange(min_layer, max_layer, desc='Finding best positive direction'):
+            tmp_pos_dir = self.compute_positive_direction(
+                positive_outputs=d_out['pos'],
+                negative_outputs=d_out['neg'],
+                layer=layer_idx,
+            )
+
+            conversations_ablated = self.run_forged_model(
+                model=model,
+                type_of_layer=AblationDecoderLayer,
+                positive_dir=tmp_pos_dir,
+                tokenizer=tokenizer,
+                min_layer=min_layer,
+                max_layer=max_layer,
+                instructions=eval_positive_instructions,
+                max_new_tokens=100,
+                stream=False,
+            )
+
+            conversations_added = self.run_forged_model(
+                model=model,
+                type_of_layer=AdditionDecoderLayer,
+                positive_dir=tmp_pos_dir,
+                tokenizer=tokenizer,
+                min_layer=min_layer,
+                max_layer=max_layer,
+                instructions=eval_negative_instructions,
+                max_new_tokens=100,
+                stream=False,
+            )
+
+            positive_score = sum(
+                        [
+                            scorer.score(
+                                model_response=conv[-1]['content'],
+                                user_query=conv[-2]['content'],
+                            ) for conv in conversations_ablated
+                        ]
+                    )
+            negative_score = 1 - sum(
+                        [
+                            scorer.score(
+                                model_response=conv[-1]['content'],
+                                user_query=conv[-2]['content'],
+                            ) for conv in conversations_added
+                        ]
+                    )
+
+            score_x_layer.append(
+                {
+                    'layer': layer_idx,
+                    'score': (positive_score - negative_score)/2,
+                    'dir': tmp_pos_dir,
+                }
+            )
+        score_x_layer = sorted(score_x_layer, key=lambda x: x['score'], reverse=True)
+        return score_x_layer[0]['dir']
+
+    def _replace_layers(
+            self,
+            new_layer: Type[torch.nn.Module],
+            max_layer: int,
+            min_layer: int,
+            model: AutoModelForCausalLM | PreTrainedModel,
+            direction: Tensor,
     ):
-        pass
+        for layer_idx in trange(min_layer, max_layer, desc='Ablating model layers'):
+            if isinstance(model.model.layers[layer_idx], AblationDecoderLayer) or isinstance(
+                    model.model.layers[layer_idx], AdditionDecoderLayer):
+                model.model.layers[layer_idx] = new_layer(
+                    original_layer=model.model.layers[layer_idx].original_layer,
+                    refusal_dir=direction,
+                )
+            else:
+                model.model.layers[layer_idx] = new_layer(
+                    original_layer=model.model.layers[layer_idx],
+                    refusal_dir=direction,
+                )
+        return model
 
     def compute_positive_direction(
             self,
             positive_outputs: List[GenerateDecoderOnlyOutput],
             negative_outputs: List[GenerateDecoderOnlyOutput],
-            layer: str,
+            layer: int | None = None,
     ) -> Tensor:
-        positive_mean = torch.stack([output.hidden_states[0][layer][:, -1, :] for output in positive_outputs]).mean(dim=0)
-        negative_mean = torch.stack([output.hidden_states[0][layer][:, -1, :] for output in negative_outputs]).mean(dim=0)
+        if layer is None:
+            layer = int(len(model.model.layers) * 0.6)
+        positive_mean = torch.stack([output.hidden_states[0][layer][:, -self.max_toks:, :].mean(dim=1) for output in positive_outputs]).mean(dim=0)
+        negative_mean = torch.stack([output.hidden_states[0][layer][:, -self.max_toks:, :].mean(dim=1) for output in negative_outputs]).mean(dim=0)
 
         positive_dir = positive_mean - negative_mean
         positive_dir = positive_dir / positive_dir.norm()
 
         return positive_dir
 
-    @staticmethod
-    def _direction_ablation_hook(
-            activation: jaxtyping.Float[torch.Tensor, "... d_act"],
-            direction: jaxtyping.Float[torch.Tensor, "d_act"]
-    ) -> Tensor:
-        proj = einops.einsum(activation, direction.view(-1, 1), '... d_act, d_act single -> ... single') * direction
-        return activation - proj
-
 
     def run_forged_model(
             self,
-            model: AutoModelForCausalLM,
-            refusal_dir: Tensor,
+            model: AutoModelForCausalLM | PreTrainedModel,
+            type_of_layer: Type[torch.nn.Module],
+            positive_dir: Tensor,
             tokenizer: PreTrainedTokenizerBase | AutoTokenizer,
-            instructions: List[str],
+            min_layer: int,
+            max_layer: int,
+            instructions: List[str] | None = None,
+            tokenized_instructions: List[Tensor] | None = None,
             max_new_tokens: int = 100,
             stream: bool = False,
     ) -> List[List[Dict[str, Any]]]:
 
-        for layer_idx in trange(len(model.model.layers), desc='Ablating model layers'):
-            model.model.layers[layer_idx] = AblationDecoderLayer(
-                original_layer=model.model.layers[layer_idx],
-                refusal_dir=refusal_dir,
-            )
+        new_model = self._replace_layers(
+            new_layer=type_of_layer,
+            max_layer=max_layer,
+            min_layer=min_layer,
+            model=model,
+            direction=positive_dir,
+        )
 
-        logging.info('Tokenizing instructions for newly forged model.')
-        with tqdm(total=len(instructions), desc='Tokenizing instructions for newly forged model') as bar:
-            instr_tokens: List[torch.Tensor] = [
-                self._tokenize(tokenizer=tokenizer, instruction=instruction, bar=bar)
-                for instruction in instructions
-            ]
+        if tokenized_instructions:
+            logging.info('Using provided tokenized instructions. No need to tokenize again.')
+            instr_tokens = tokenized_instructions
+        elif instructions:
+            logging.info('Tokenizing instructions for newly forged model.')
+            with tqdm(total=len(instructions), desc='Tokenizing instructions for newly forged model') as bar:
+                instr_tokens: List[torch.Tensor] = [
+                    self._tokenize(tokenizer=tokenizer, instruction=instruction, bar=bar)
+                    for instruction in instructions
+                ]
+        else:
+            raise ValueError('Either instructions or tokenized instructions must be provided.')
+
 
         logging.info('Generating tokens for newly forged model.')
         with tqdm(total=len(instructions), desc='Generating tokens for newly forged model') as bar:
             encoded_responses = [
                 self._generate_new_tokens(
-                    model=model,
+                    model=new_model,
                     tokens=instr_token,
                     bar=bar,
                     n_generated_tokens=max_new_tokens,
@@ -228,11 +344,11 @@ class Forge:
             ]
 
         conversations: List[List[Dict[str, Any]]] = []
-        for enc_resp, instr in encoded_responses, instructions:
+        for enc_resp, instr in zip(encoded_responses, instructions):
             conversations.append(
                 [
                     {"role": "user", "content": instr},
-                    {"role": "assistant", "content": tokenizer.batch_decode(enc_resp, skip_special_tokens=True)}
+                    {"role": "assistant", "content": tokenizer.decode(enc_resp.sequences[0].tolist(), skip_special_tokens=True)}
                 ]
             )
 
@@ -240,15 +356,55 @@ class Forge:
 
 
 if __name__ == "__main__":
+    random.seed(42)
     MODEL = 'google/gemma-1.1-2b-it'
-    with open("harmful.txt", "r") as f:
+    with open("./harmful.txt", "r") as f:
         pos = f.readlines()
 
-    with open("harmless.txt", "r") as f:
+    with open("./harmless.txt", "r") as f:
         neg = f.readlines()
-    max_inst = 1
+
+    max_inst = 100
     logging.basicConfig(level=logging.INFO)
+
     forge = Forge()
     forge.load_instructions(positive_behaviour_instructions=pos, negative_behaviour_instructions=neg)
+
     tokenizer = AutoTokenizer.from_pretrained(MODEL, trust_remote_code=True)
-    d_toks = forge.tokenize_instructions(tokenizer=tokenizer, max_n_negative_instruction=max_inst, max_n_positive_instruction=max_inst)
+    model = AutoModelForCausalLM.from_pretrained(
+        MODEL,
+        trust_remote_code=True,
+        torch_dtype=torch.bfloat16,
+    ).to(forge.device)
+
+    d_toks = forge.tokenize_instructions(
+        tokenizer=tokenizer,
+        max_n_negative_instruction=max_inst,
+        max_n_positive_instruction=max_inst,
+    )
+
+    d_instr = forge.compute_output(
+        model=model,
+        positive_behaviour_tokenized_instructions=d_toks['positive_tokens'],
+        negative_behaviour_tokenized_instructions=d_toks['negative_tokens'],
+    )
+
+    refusal_dir = forge.compute_positive_direction(
+        positive_outputs=d_instr['pos'],
+        negative_outputs=d_instr['neg'],
+    )
+
+    conversations = forge.run_forged_model(
+        model=model,
+        positive_dir=refusal_dir,
+        tokenizer=tokenizer,
+        instructions=sample(population=pos, k=20),
+        max_new_tokens=100,
+        stream=False,
+    )
+
+    for conversation in conversations:
+        print('='*20)
+        for round in conversation:
+            print(f'{round["role"]}: {round["content"]}')
+
