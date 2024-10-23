@@ -4,16 +4,16 @@ from einops import einops
 
 
 class AblationDecoderLayer(torch.nn.Module):
-    def __init__(self, original_layer, refusal_dir):
+    def __init__(self, original_layer, direection):
         super(AblationDecoderLayer, self).__init__()
         self.original_layer = original_layer
-        self.positive_dr = refusal_dir
+        self.objective_behaviour_dr = direection
 
     def forward(self, *args, **kwargs):
         hidden_states = args[0]
         ablated = self._direction_ablation_hook(
             activation=hidden_states,
-            direction=self.positive_dr.to(hidden_states.device),
+            direction=self.objective_behaviour_dr.to(hidden_states.device),
         ).to(hidden_states.device)
         args = (ablated,) + args[1:]
         return self.original_layer.forward(*args, **kwargs)
@@ -28,16 +28,16 @@ class AblationDecoderLayer(torch.nn.Module):
 
 
 class AdditionDecoderLayer(torch.nn.Module):
-    def __init__(self, original_layer, refusal_dir):
+    def __init__(self, original_layer, direection):
         super(AdditionDecoderLayer, self).__init__()
         self.original_layer = original_layer
-        self.positive_dir = refusal_dir
+        self.objective_behaviour_dir = direection
 
     def forward(self, *args, **kwargs):
         hidden_states = args[0]
         added = self._direction_addition_hook(
             activation=hidden_states,
-            direction=self.positive_dir.to(hidden_states.device),
+            direction=self.objective_behaviour_dir.to(hidden_states.device),
         ).to(hidden_states.device)
         args = (added,) + args[1:]
         return self.original_layer.forward(*args, **kwargs)
