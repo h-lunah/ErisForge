@@ -18,8 +18,8 @@ class Forge:
     def __init__(self):
         self.max_toks = 1
         self.max_iterations: int = 0
-        self.positive_behaviour_instructions: List[str] = []
-        self.negative_behaviour_instructions: List[str] = []
+        self.objective_behaviour_instructions: List[str] = []
+        self.anti_behaviour_instructions: List[str] = []
         if torch.backends.mps.is_available():
             logging.info("MPS is available.")
             self.device = torch.device("mps")
@@ -31,12 +31,12 @@ class Forge:
             self.device = torch.device("cpu")
 
 
-    def load_instructions(self, positive_behaviour_instructions: List[str], negative_behaviour_instructions: List[str]):
-        logging.info(f"Loading instructions, positive: {len(positive_behaviour_instructions)}, negative: {len(negative_behaviour_instructions)}")
-        self.positive_behaviour_instructions: List[str] = positive_behaviour_instructions
-        self.negative_behaviour_instructions: List[str] = negative_behaviour_instructions
-        self.max_iterations: int = len(positive_behaviour_instructions) + len(negative_behaviour_instructions)
-        logging.info(f"Instructions loaded, positive: {len(positive_behaviour_instructions)}, negative: {len(negative_behaviour_instructions)}")
+    def load_instructions(self, objective_behaviour_instructions: List[str], anti_behaviour_instructions: List[str]):
+        logging.info(f"Loading instructions, objective_behaviour: {len(objective_behaviour_instructions)}, antiobjective: {len(anti_behaviour_instructions)}")
+        self.objective_behaviour_instructions: List[str] = objective_behaviour_instructions
+        self.anti_behaviour_instructions: List[str] = anti_behaviour_instructions
+        self.max_iterations: int = len(objective_behaviour_instructions) + len(anti_behaviour_instructions)
+        logging.info(f"Instructions loaded, objective_behaviour: {len(objective_behaviour_instructions)}, antiobjective: {len(anti_behaviour_instructions)}")
 
     @staticmethod
     def _tokenize(tokenizer: PreTrainedTokenizerBase, instruction: str, bar: tqdm | None = None) -> torch.Tensor:
@@ -54,40 +54,40 @@ class Forge:
     def tokenize_instructions(
             self,
             tokenizer: PreTrainedTokenizerBase | AutoTokenizer | str,
-            max_n_positive_instruction:  int | None = None,
-            max_n_negative_instruction:  int | None = None,
+            max_n_objective_behaviour_instruction:  int | None = None,
+            max_n_antiobjective_instruction:  int | None = None,
     ) -> Dict[str, List[Tensor]]:
         if isinstance(tokenizer, str):
             logging.info(f"Loading tokenizer from {tokenizer}")
             tokenizer = AutoTokenizer.from_pretrained(tokenizer, trust_remote_code=True)
 
-        max_n_positive_instruction = min(len(self.positive_behaviour_instructions), max_n_positive_instruction) if max_n_positive_instruction else len(self.positive_behaviour_instructions)
-        max_n_negative_instruction = min(len(self.negative_behaviour_instructions), max_n_negative_instruction) if max_n_negative_instruction else len(self.negative_behaviour_instructions)
+        max_n_objective_behaviour_instruction = min(len(self.objective_behaviour_instructions), max_n_objective_behaviour_instruction) if max_n_objective_behaviour_instruction else len(self.objective_behaviour_instructions)
+        max_n_antiobjective_instruction = min(len(self.anti_behaviour_instructions), max_n_antiobjective_instruction) if max_n_antiobjective_instruction else len(self.anti_behaviour_instructions)
 
-        positive_behaviour_instructions = random.sample(self.positive_behaviour_instructions, max_n_positive_instruction)
-        negative_behaviour_instructions = random.sample(self.negative_behaviour_instructions, max_n_negative_instruction)
+        objective_behaviour_instructions = random.sample(self.objective_behaviour_instructions, max_n_objective_behaviour_instruction)
+        anti_behaviour_instructions = random.sample(self.anti_behaviour_instructions, max_n_antiobjective_instruction)
 
-        logging.info(f'For tokenization, using {max_n_positive_instruction/len(self.positive_behaviour_instructions)*100:.2f}% positive instructions.')
-        logging.info(f'For tokenization, using {max_n_negative_instruction/len(self.negative_behaviour_instructions)*100:.2f}% negative instructions.')
+        logging.info(f'For tokenization, using {max_n_objective_behaviour_instruction/len(self.objective_behaviour_instructions)*100:.2f}% objective_behaviour instructions.')
+        logging.info(f'For tokenization, using {max_n_antiobjective_instruction/len(self.anti_behaviour_instructions)*100:.2f}% antiobjective instructions.')
 
-        logging.info('Tokenizing Positive instructions...')
-        with tqdm(total=max_n_positive_instruction, desc='Tokenizing Positive instructions') as bar:
-            positive_instr_tokens: List[torch.Tensor] = [
-                self._tokenize(tokenizer=tokenizer, instruction=positive_behaviour_instruction, bar=bar)
-                for positive_behaviour_instruction in positive_behaviour_instructions
+        logging.info('Tokenizing objective_behaviour instructions...')
+        with tqdm(total=max_n_objective_behaviour_instruction, desc='Tokenizing objective_behaviour instructions') as bar:
+            objective_behaviour_instr_tokens: List[torch.Tensor] = [
+                self._tokenize(tokenizer=tokenizer, instruction=objective_behaviour_instruction, bar=bar)
+                for objective_behaviour_instruction in objective_behaviour_instructions
             ]
 
-        logging.info('Tokenizing Negative instructions...')
-        with tqdm(total=max_n_negative_instruction, desc='Tokenizing Negative instructions') as bar:
-            negative_instr_tokens: List[torch.Tensor] = [
-                self._tokenize(tokenizer=tokenizer, instruction=negative_behaviour_instruction, bar=bar)
-                for negative_behaviour_instruction in negative_behaviour_instructions
+        logging.info('Tokenizing antiobjective instructions...')
+        with tqdm(total=max_n_antiobjective_instruction, desc='Tokenizing antiobjective instructions') as bar:
+            antiobjective_instr_tokens: List[torch.Tensor] = [
+                self._tokenize(tokenizer=tokenizer, instruction=anti_behaviour_instruction, bar=bar)
+                for anti_behaviour_instruction in anti_behaviour_instructions
             ]
         logging.info('Tokenization complete.')
 
         return {
-            'positive_tokens': positive_instr_tokens,
-            'negative_tokens': negative_instr_tokens
+            'objective_behaviour_tokens': objective_behaviour_instr_tokens,
+            'antiobjective_tokens': antiobjective_instr_tokens
         }
 
     def _generate_new_tokens(
@@ -117,8 +117,8 @@ class Forge:
     def compute_output(
             self,
             model: AutoModelForCausalLM | str,
-            positive_behaviour_tokenized_instructions: List[Tensor],
-            negative_behaviour_tokenized_instructions: List[Tensor],
+            objective_behaviour_tokenized_instructions: List[Tensor],
+            anti_behaviour_tokenized_instructions: List[Tensor],
     ) -> Dict[str, List[GenerateDecoderOnlyOutput]]:
         if isinstance(model, str):
             logging.info(f"Loading model from {model}")
@@ -131,45 +131,45 @@ class Forge:
         else:
             model.to(self.device)
 
-        logging.info("Generating tokens on positive instructions.")
-        with tqdm(total=len(positive_behaviour_tokenized_instructions), desc="Generating tokens on positive instructions") as bar:
-            positive_outputs = [
+        logging.info("Generating tokens on objective_behaviour instructions.")
+        with tqdm(total=len(objective_behaviour_tokenized_instructions), desc="Generating tokens on objective_behaviour instructions") as bar:
+            objective_behaviour_outputs = [
                 self._generate_new_tokens(
                     model=model,
-                    tokens=positive_behaviour_tokenized_instruction,
+                    tokens=objective_behaviour_tokenized_instruction,
                     bar=bar,
                     n_generated_tokens=self.max_toks,
                 )
-                for positive_behaviour_tokenized_instruction in positive_behaviour_tokenized_instructions
+                for objective_behaviour_tokenized_instruction in objective_behaviour_tokenized_instructions
             ]
-        logging.info('Completed generating tokens on positive instructions.')
+        logging.info('Completed generating tokens on objective_behaviour instructions.')
 
-        logging.info("Generating tokens on negative instructions.")
-        with tqdm(total=len(negative_behaviour_tokenized_instructions), desc="Generating tokens on negative instructions") as bar:
-            negative_outputs = [
+        logging.info("Generating tokens on antiobjective instructions.")
+        with tqdm(total=len(anti_behaviour_tokenized_instructions), desc="Generating tokens on antiobjective instructions") as bar:
+            antiobjective_outputs = [
                 self._generate_new_tokens(
                     model=model,
-                    tokens=negative_behaviour_instruction,
+                    tokens=anti_behaviour_instruction,
                     bar=bar,
                     n_generated_tokens=self.max_toks,
                 )
-                for negative_behaviour_instruction in negative_behaviour_tokenized_instructions
+                for anti_behaviour_instruction in anti_behaviour_tokenized_instructions
             ]
-        logging.info('Completed generating tokens on negative instructions.')
+        logging.info('Completed generating tokens on antiobjective instructions.')
 
         return {
-            'pos': positive_outputs,
-            'neg': negative_outputs,
+            'obj_beh': objective_behaviour_outputs,
+            'anti_obj': antiobjective_outputs,
         }
 
-    def compute_positive_metric(self):
+    def compute_objective_behaviour_metric(self):
 
-    def find_approximate_best_positive_direction(
+    def find_approximate_best_objective_behaviour_direction(
             self,
             model: AutoModelForCausalLM | PreTrainedModel,
             scorer: BaseScorer,
-            eval_positive_instructions: List[str],
-            eval_negative_instructions: List[str],
+            eval_objective_behaviour_instructions: List[str],
+            eval_antiobjective_instructions: List[str],
             min_layer: int | None = None,
             max_layer: int | None = None,
     ) -> Tensor:
@@ -180,38 +180,38 @@ class Forge:
 
         score_x_layer = []
 
-        with tqdm(total=len(eval_positive_instructions), desc='Tokenizing Positive Eval Instructions set') as bar:
-            pos_toks = [
+        with tqdm(total=len(eval_objective_behaviour_instructions), desc='Tokenizing objective_behaviour Eval Instructions set') as bar:
+            obj_beh_toks = [
                 self._tokenize(tokenizer=tokenizer, instruction=instr, bar=bar)
-                for instr in eval_positive_instructions
+                for instr in eval_objective_behaviour_instructions
             ]
-        with tqdm(total=len(eval_negative_instructions), desc='Tokenizing Negative Eval Instructions set') as bar:
-            neg_toks = [
+        with tqdm(total=len(eval_antiobjective_instructions), desc='Tokenizing antiobjective Eval Instructions set') as bar:
+            anti_obj_toks = [
                 self._tokenize(tokenizer=tokenizer, instruction=instr, bar=bar)
-                for instr in eval_negative_instructions
+                for instr in eval_antiobjective_instructions
             ]
 
         d_out = self.compute_output(
             model=model,
-            positive_behaviour_tokenized_instructions=pos_toks,
-            negative_behaviour_tokenized_instructions=neg_toks,
+            objective_behaviour_tokenized_instructions=obj_beh_toks,
+            anti_behaviour_tokenized_instructions=anti_obj_toks,
         )
 
-        for layer_idx in trange(min_layer, max_layer, desc='Finding best positive direction'):
-            tmp_pos_dir = self.compute_positive_direction(
-                positive_outputs=d_out['pos'],
-                negative_outputs=d_out['neg'],
+        for layer_idx in trange(min_layer, max_layer, desc='Finding best objective_behaviour direction'):
+            tmp_obj_beh_dir = self.compute_objective_behaviour_direction(
+                objective_behaviour_outputs=d_out['obj_beh'],
+                antiobjective_outputs=d_out['anti_obj'],
                 layer=layer_idx,
             )
 
             conversations_ablated = self.run_forged_model(
                 model=model,
                 type_of_layer=AblationDecoderLayer,
-                positive_dir=tmp_pos_dir,
+                objective_behaviour_dir=tmp_obj_beh_dir,
                 tokenizer=tokenizer,
                 min_layer=min_layer,
                 max_layer=max_layer,
-                instructions=eval_positive_instructions,
+                instructions=eval_objective_behaviour_instructions,
                 max_new_tokens=100,
                 stream=False,
             )
@@ -219,16 +219,16 @@ class Forge:
             conversations_added = self.run_forged_model(
                 model=model,
                 type_of_layer=AdditionDecoderLayer,
-                positive_dir=tmp_pos_dir,
+                objective_behaviour_dir=tmp_obj_beh_dir,
                 tokenizer=tokenizer,
                 min_layer=layer_idx,
                 max_layer=layer_idx+1,
-                instructions=eval_negative_instructions,
+                instructions=eval_antiobjective_instructions,
                 max_new_tokens=100,
                 stream=False,
             )
 
-            positive_score = sum(
+            objective_behaviour_score = sum(
                         [
                             scorer.score(
                                 model_response=conv[-1]['content'],
@@ -236,7 +236,7 @@ class Forge:
                             ) for conv in conversations_ablated
                         ]
                     )
-            negative_score = 1 - sum(
+            antiobjective_score = 1 - sum(
                         [
                             scorer.score(
                                 model_response=conv[-1]['content'],
@@ -248,8 +248,8 @@ class Forge:
             score_x_layer.append(
                 {
                     'layer': layer_idx,
-                    'score': (positive_score - negative_score)/2,
-                    'dir': tmp_pos_dir,
+                    'score': (objective_behaviour_score - antiobjective_score)/2,
+                    'dir': tmp_obj_beh_dir,
                 }
             )
         score_x_layer = sorted(score_x_layer, key=lambda x: x['score'], reverse=True)
@@ -277,43 +277,49 @@ class Forge:
                 )
         return model
 
-    def compute_positive_direction(
+    def compute_objective_behaviour_direction(
             self,
-            positive_outputs: List[GenerateDecoderOnlyOutput],
-            negative_outputs: List[GenerateDecoderOnlyOutput],
+            objective_behaviour_outputs: List[GenerateDecoderOnlyOutput],
+            antiobjective_outputs: List[GenerateDecoderOnlyOutput],
             layer: int | None = None,
     ) -> Tensor:
         if layer is None:
             layer = int(len(model.model.layers) * 0.6)
-        positive_mean = torch.stack([output.hidden_states[0][layer][:, -self.max_toks:, :].mean(dim=1) for output in positive_outputs]).mean(dim=0)
-        negative_mean = torch.stack([output.hidden_states[0][layer][:, -self.max_toks:, :].mean(dim=1) for output in negative_outputs]).mean(dim=0)
+        objective_behaviour_mean = torch.stack([output.hidden_states[0][layer][:, -self.max_toks:, :].mean(dim=1) for output in objective_behaviour_outputs]).mean(dim=0)
+        antiobjective_mean = torch.stack([output.hidden_states[0][layer][:, -self.max_toks:, :].mean(dim=1) for output in antiobjective_outputs]).mean(dim=0)
 
-        positive_dir = positive_mean - negative_mean
-        positive_dir = positive_dir / positive_dir.norm()
+        objective_behaviour_dir = objective_behaviour_mean - antiobjective_mean
+        objective_behaviour_dir = objective_behaviour_dir / objective_behaviour_dir.norm()
 
-        return positive_dir
+        return objective_behaviour_dir
 
 
     def run_forged_model(
             self,
             model: AutoModelForCausalLM | PreTrainedModel,
             type_of_layer: Type[torch.nn.Module],
-            positive_dir: Tensor,
+            objective_behaviour_dir: Tensor,
             tokenizer: PreTrainedTokenizerBase | AutoTokenizer,
-            min_layer: int,
-            max_layer: int,
+            min_layer: int | None = None,
+            max_layer: int | None = None,
             instructions: List[str] | None = None,
             tokenized_instructions: List[Tensor] | None = None,
             max_new_tokens: int = 100,
             stream: bool = False,
     ) -> List[List[Dict[str, Any]]]:
 
+        if min_layer is None:
+            min_layer = max(int(len(model.model.layers) * 0.2), 1)
+        if max_layer is None:
+            max_layer = min(int(len(model.model.layers) * 0.8), len(model.model.layers)-2)
+
+
         new_model = self._replace_layers(
             new_layer=type_of_layer,
             max_layer=max_layer,
             min_layer=min_layer,
             model=model,
-            direction=positive_dir,
+            direction=objective_behaviour_dir,
         )
 
         if tokenized_instructions:
@@ -359,16 +365,16 @@ if __name__ == "__main__":
     random.seed(42)
     MODEL = 'google/gemma-1.1-2b-it'
     with open("./harmful.txt", "r") as f:
-        pos = f.readlines()
+        obj_beh = f.readlines()
 
     with open("./harmless.txt", "r") as f:
-        neg = f.readlines()
+        anti_obj = f.readlines()
 
     max_inst = 100
     logging.basicConfig(level=logging.INFO)
 
     forge = Forge()
-    forge.load_instructions(positive_behaviour_instructions=pos, negative_behaviour_instructions=neg)
+    forge.load_instructions(objective_behaviour_instructions=obj_beh, anti_behaviour_instructions=anti_obj)
 
     tokenizer = AutoTokenizer.from_pretrained(MODEL, trust_remote_code=True)
     model = AutoModelForCausalLM.from_pretrained(
@@ -379,26 +385,26 @@ if __name__ == "__main__":
 
     d_toks = forge.tokenize_instructions(
         tokenizer=tokenizer,
-        max_n_negative_instruction=max_inst,
-        max_n_positive_instruction=max_inst,
+        max_n_antiobjective_instruction=max_inst,
+        max_n_objective_behaviour_instruction=max_inst,
     )
 
     d_instr = forge.compute_output(
         model=model,
-        positive_behaviour_tokenized_instructions=d_toks['positive_tokens'],
-        negative_behaviour_tokenized_instructions=d_toks['negative_tokens'],
+        objective_behaviour_tokenized_instructions=d_toks['objective_behaviour_tokens'],
+        anti_behaviour_tokenized_instructions=d_toks['antiobjective_tokens'],
     )
 
-    refusal_dir = forge.compute_positive_direction(
-        positive_outputs=d_instr['pos'],
-        negative_outputs=d_instr['neg'],
+    refusal_dir = forge.compute_objective_behaviour_direction(
+        objective_behaviour_outputs=d_instr['obj_beh'],
+        antiobjective_outputs=d_instr['anti_obj'],
     )
 
     conversations = forge.run_forged_model(
         model=model,
-        positive_dir=refusal_dir,
+        objective_behaviour_dir=refusal_dir,
         tokenizer=tokenizer,
-        instructions=sample(population=pos, k=20),
+        instructions=sample(population=obj_beh, k=20),
         max_new_tokens=100,
         stream=False,
     )
