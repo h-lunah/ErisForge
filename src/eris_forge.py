@@ -8,9 +8,11 @@ from torch import Tensor, nn
 from tqdm import tqdm, trange
 from transformers import AutoTokenizer, PreTrainedTokenizerBase, AutoModelForCausalLM, TextStreamer, PreTrainedModel
 from transformers.generation import GenerateDecoderOnlyOutput
+from transformers.models.paligemma.convert_paligemma_weights_to_hf import device
 
 from src.layers import AblationDecoderLayer, AdditionDecoderLayer
 from src.scorers.base_scorer import BaseScorer
+from src.scorers.refusal_scorer.expression_refusal_scorer import ExpressionRefusalScorer
 
 
 class Forge:
@@ -30,13 +32,14 @@ class Forge:
             logging.info("CPU is available.")
             self.device = torch.device("cpu")
 
-
     def load_instructions(self, objective_behaviour_instructions: List[str], anti_behaviour_instructions: List[str]):
-        logging.info(f"Loading instructions, objective_behaviour: {len(objective_behaviour_instructions)}, antiobjective: {len(anti_behaviour_instructions)}")
+        logging.info(
+            f"Loading instructions, objective_behaviour: {len(objective_behaviour_instructions)}, antiobjective: {len(anti_behaviour_instructions)}")
         self.objective_behaviour_instructions: List[str] = objective_behaviour_instructions
         self.anti_behaviour_instructions: List[str] = anti_behaviour_instructions
         self.max_iterations: int = len(objective_behaviour_instructions) + len(anti_behaviour_instructions)
-        logging.info(f"Instructions loaded, objective_behaviour: {len(objective_behaviour_instructions)}, antiobjective: {len(anti_behaviour_instructions)}")
+        logging.info(
+            f"Instructions loaded, objective_behaviour: {len(objective_behaviour_instructions)}, antiobjective: {len(anti_behaviour_instructions)}")
 
     @staticmethod
     def _tokenize(tokenizer: PreTrainedTokenizerBase, instruction: str, bar: tqdm | None = None) -> torch.Tensor:
@@ -54,24 +57,32 @@ class Forge:
     def tokenize_instructions(
             self,
             tokenizer: PreTrainedTokenizerBase | AutoTokenizer | str,
-            max_n_objective_behaviour_instruction:  int | None = None,
-            max_n_antiobjective_instruction:  int | None = None,
+            max_n_objective_behaviour_instruction: int | None = None,
+            max_n_antiobjective_instruction: int | None = None,
     ) -> Dict[str, List[Tensor]]:
         if isinstance(tokenizer, str):
             logging.info(f"Loading tokenizer from {tokenizer}")
             tokenizer = AutoTokenizer.from_pretrained(tokenizer, trust_remote_code=True)
 
-        max_n_objective_behaviour_instruction = min(len(self.objective_behaviour_instructions), max_n_objective_behaviour_instruction) if max_n_objective_behaviour_instruction else len(self.objective_behaviour_instructions)
-        max_n_antiobjective_instruction = min(len(self.anti_behaviour_instructions), max_n_antiobjective_instruction) if max_n_antiobjective_instruction else len(self.anti_behaviour_instructions)
+        max_n_objective_behaviour_instruction = min(len(self.objective_behaviour_instructions),
+                                                    max_n_objective_behaviour_instruction) if max_n_objective_behaviour_instruction else len(
+            self.objective_behaviour_instructions)
+        max_n_antiobjective_instruction = min(len(self.anti_behaviour_instructions),
+                                              max_n_antiobjective_instruction) if max_n_antiobjective_instruction else len(
+            self.anti_behaviour_instructions)
 
-        objective_behaviour_instructions = random.sample(self.objective_behaviour_instructions, max_n_objective_behaviour_instruction)
+        objective_behaviour_instructions = random.sample(self.objective_behaviour_instructions,
+                                                         max_n_objective_behaviour_instruction)
         anti_behaviour_instructions = random.sample(self.anti_behaviour_instructions, max_n_antiobjective_instruction)
 
-        logging.info(f'For tokenization, using {max_n_objective_behaviour_instruction/len(self.objective_behaviour_instructions)*100:.2f}% objective_behaviour instructions.')
-        logging.info(f'For tokenization, using {max_n_antiobjective_instruction/len(self.anti_behaviour_instructions)*100:.2f}% antiobjective instructions.')
+        logging.info(
+            f'For tokenization, using {max_n_objective_behaviour_instruction / len(self.objective_behaviour_instructions) * 100:.2f}% objective_behaviour instructions.')
+        logging.info(
+            f'For tokenization, using {max_n_antiobjective_instruction / len(self.anti_behaviour_instructions) * 100:.2f}% antiobjective instructions.')
 
         logging.info('Tokenizing objective_behaviour instructions...')
-        with tqdm(total=max_n_objective_behaviour_instruction, desc='Tokenizing objective_behaviour instructions') as bar:
+        with tqdm(total=max_n_objective_behaviour_instruction,
+                  desc='Tokenizing objective_behaviour instructions') as bar:
             objective_behaviour_instr_tokens: List[torch.Tensor] = [
                 self._tokenize(tokenizer=tokenizer, instruction=objective_behaviour_instruction, bar=bar)
                 for objective_behaviour_instruction in objective_behaviour_instructions
@@ -112,7 +123,8 @@ class Forge:
         if streamer:
             params["streamer"] = streamer
 
-        return model.generate(**params)
+        output = model.generate(**params)
+        return output
 
     def compute_output(
             self,
@@ -122,7 +134,7 @@ class Forge:
     ) -> Dict[str, List[GenerateDecoderOnlyOutput]]:
         if isinstance(model, str):
             logging.info(f"Loading model from {model}")
-            model: AutoModelForCausalLM  = AutoModelForCausalLM.from_pretrained(
+            model: AutoModelForCausalLM = AutoModelForCausalLM.from_pretrained(
                 model,
                 trust_remote_code=True,
                 device_map=self.device,
@@ -132,7 +144,8 @@ class Forge:
             model.to(self.device)
 
         logging.info("Generating tokens on objective_behaviour instructions.")
-        with tqdm(total=len(objective_behaviour_tokenized_instructions), desc="Generating tokens on objective_behaviour instructions") as bar:
+        with tqdm(total=len(objective_behaviour_tokenized_instructions),
+                  desc="Generating tokens on objective_behaviour instructions") as bar:
             objective_behaviour_outputs = [
                 self._generate_new_tokens(
                     model=model,
@@ -145,7 +158,8 @@ class Forge:
         logging.info('Completed generating tokens on objective_behaviour instructions.')
 
         logging.info("Generating tokens on antiobjective instructions.")
-        with tqdm(total=len(anti_behaviour_tokenized_instructions), desc="Generating tokens on antiobjective instructions") as bar:
+        with tqdm(total=len(anti_behaviour_tokenized_instructions),
+                  desc="Generating tokens on antiobjective instructions") as bar:
             antiobjective_outputs = [
                 self._generate_new_tokens(
                     model=model,
@@ -174,34 +188,42 @@ class Forge:
         if min_layer is None:
             min_layer = max(int(len(model.model.layers) * 0.2), 1)
         if max_layer is None:
-            max_layer = min(int(len(model.model.layers) * 0.8), len(model.model.layers)-2)
+            max_layer = min(int(len(model.model.layers) * 0.8), len(model.model.layers) - 2)
 
+        logging.info(f'Using layers from {min_layer} to {max_layer} for computing best direction.')
         score_x_layer = []
-
-        with tqdm(total=len(eval_objective_behaviour_instructions), desc='Tokenizing objective_behaviour Eval Instructions set') as bar:
+        logging.info('Tokenizing evaluation instructions...')
+        with tqdm(total=len(eval_objective_behaviour_instructions),
+                  desc='Tokenizing objective_behaviour Eval Instructions set') as bar:
             obj_beh_toks = [
                 self._tokenize(tokenizer=tokenizer, instruction=instr, bar=bar)
                 for instr in eval_objective_behaviour_instructions
             ]
-        with tqdm(total=len(eval_antiobjective_instructions), desc='Tokenizing antiobjective Eval Instructions set') as bar:
+        with tqdm(total=len(eval_antiobjective_instructions),
+                  desc='Tokenizing antiobjective Eval Instructions set') as bar:
             anti_obj_toks = [
                 self._tokenize(tokenizer=tokenizer, instruction=instr, bar=bar)
                 for instr in eval_antiobjective_instructions
             ]
 
+        logging.info('Computing output for evaluation instructions...')
         d_out = self.compute_output(
             model=model,
             objective_behaviour_tokenized_instructions=obj_beh_toks,
             anti_behaviour_tokenized_instructions=anti_obj_toks,
         )
 
+        self.free_memory([obj_beh_toks, anti_obj_toks])
+
+        logging.info('Finding best objective_behaviour direction...')
         for layer_idx in trange(min_layer, max_layer, desc='Finding best objective_behaviour direction'):
             tmp_obj_beh_dir = self.compute_objective_behaviour_direction(
                 objective_behaviour_outputs=d_out['obj_beh'],
                 antiobjective_outputs=d_out['anti_obj'],
                 layer=layer_idx,
             )
-
+            logging.info(f'Objective_behaviour direction computed for layer {layer_idx}.')
+            logging.info('Ablating and adding layers to compute score...')
             conversations_ablated = self.run_forged_model(
                 model=model,
                 type_of_layer=AblationDecoderLayer,
@@ -214,39 +236,41 @@ class Forge:
                 stream=False,
             )
 
+
+            logging.info('Ablation complete. Adding layers to compute score...')
             conversations_added = self.run_forged_model(
                 model=model,
                 type_of_layer=AdditionDecoderLayer,
                 objective_behaviour_dir=tmp_obj_beh_dir,
                 tokenizer=tokenizer,
                 min_layer=layer_idx,
-                max_layer=layer_idx+1,
+                max_layer=layer_idx + 1,
                 instructions=eval_antiobjective_instructions,
                 max_new_tokens=100,
                 stream=False,
             )
 
             objective_behaviour_score = sum(
-                        [
-                            scorer.score(
-                                model_response=conv[-1]['content'],
-                                user_query=conv[-2]['content'],
-                            ) for conv in conversations_ablated
-                        ]
-                    )
+                [
+                    scorer.score(
+                        model_response=conv[-1]['content'],
+                        user_query=conv[-2]['content'],
+                    ) for conv in conversations_ablated
+                ]
+            )
             antiobjective_score = 1 - sum(
-                        [
-                            scorer.score(
-                                model_response=conv[-1]['content'],
-                                user_query=conv[-2]['content'],
-                            ) for conv in conversations_added
-                        ]
-                    )
+                [
+                    scorer.score(
+                        model_response=conv[-1]['content'],
+                        user_query=conv[-2]['content'],
+                    ) for conv in conversations_added
+                ]
+            )
 
             score_x_layer.append(
                 {
                     'layer': layer_idx,
-                    'score': (objective_behaviour_score - antiobjective_score)/2,
+                    'score': (objective_behaviour_score - antiobjective_score) / 2,
                     'dir': tmp_obj_beh_dir,
                 }
             )
@@ -266,12 +290,12 @@ class Forge:
                     model.model.layers[layer_idx], AdditionDecoderLayer):
                 model.model.layers[layer_idx] = new_layer(
                     original_layer=model.model.layers[layer_idx].original_layer,
-                    refusal_dir=direction,
+                    direction=direction,
                 )
             else:
                 model.model.layers[layer_idx] = new_layer(
                     original_layer=model.model.layers[layer_idx],
-                    refusal_dir=direction,
+                    direction=direction,
                 )
         return model
 
@@ -283,21 +307,24 @@ class Forge:
     ) -> Tensor:
         if layer is None:
             layer = int(len(model.model.layers) * 0.6)
-        objective_behaviour_mean = torch.stack([output.hidden_states[0][layer][:, -self.max_toks:, :].mean(dim=1) for output in objective_behaviour_outputs]).mean(dim=0)
-        antiobjective_mean = torch.stack([output.hidden_states[0][layer][:, -self.max_toks:, :].mean(dim=1) for output in antiobjective_outputs]).mean(dim=0)
+        objective_behaviour_mean = torch.stack(
+            [output.hidden_states[0][layer][:, -self.max_toks:, :].mean(dim=1) for output in
+             objective_behaviour_outputs]).mean(dim=0)
+        antiobjective_mean = torch.stack(
+            [output.hidden_states[0][layer][:, -self.max_toks:, :].mean(dim=1) for output in
+             antiobjective_outputs]).mean(dim=0)
 
         objective_behaviour_dir = objective_behaviour_mean - antiobjective_mean
         objective_behaviour_dir = objective_behaviour_dir / objective_behaviour_dir.norm()
 
         return objective_behaviour_dir
 
-
     def run_forged_model(
             self,
             model: AutoModelForCausalLM | PreTrainedModel,
-            type_of_layer: Type[torch.nn.Module],
             objective_behaviour_dir: Tensor,
             tokenizer: PreTrainedTokenizerBase | AutoTokenizer,
+            type_of_layer: Type[torch.nn.Module] | None = None,
             min_layer: int | None = None,
             max_layer: int | None = None,
             instructions: List[str] | None = None,
@@ -309,11 +336,10 @@ class Forge:
         if min_layer is None:
             min_layer = max(int(len(model.model.layers) * 0.2), 1)
         if max_layer is None:
-            max_layer = min(int(len(model.model.layers) * 0.8), len(model.model.layers)-2)
-
+            max_layer = min(int(len(model.model.layers) * 0.8), len(model.model.layers) - 2)
 
         new_model = self._replace_layers(
-            new_layer=type_of_layer,
+            new_layer=type_of_layer if type_of_layer else AblationDecoderLayer,
             max_layer=max_layer,
             min_layer=min_layer,
             model=model,
@@ -333,7 +359,6 @@ class Forge:
         else:
             raise ValueError('Either instructions or tokenized instructions must be provided.')
 
-
         logging.info('Generating tokens for newly forged model.')
         with tqdm(total=len(instructions), desc='Generating tokens for newly forged model') as bar:
             encoded_responses = [
@@ -352,11 +377,19 @@ class Forge:
             conversations.append(
                 [
                     {"role": "user", "content": instr},
-                    {"role": "assistant", "content": tokenizer.decode(enc_resp.sequences[0].tolist(), skip_special_tokens=True)}
+                    {"role": "assistant",
+                     "content": tokenizer.decode(enc_resp.sequences[0].tolist(), skip_special_tokens=True)}
                 ]
             )
 
         return conversations
+
+    def free_memory(self, list_of_variables: List[Any]):
+        del list_of_variables
+        if self.device.type == 'cuda':
+            torch.cuda.empty_cache()
+        elif self.device.type == 'mps':
+            torch.mps.empty_cache()
 
 
 if __name__ == "__main__":
@@ -369,7 +402,7 @@ if __name__ == "__main__":
         anti_obj = f.readlines()
 
     max_inst = 100
-    logging.basicConfig(level=logging.INFO)
+    # logging.basicConfig(level=logging.INFO)
 
     forge = Forge()
     forge.load_instructions(objective_behaviour_instructions=obj_beh, anti_behaviour_instructions=anti_obj)
@@ -393,9 +426,17 @@ if __name__ == "__main__":
         anti_behaviour_tokenized_instructions=d_toks['antiobjective_tokens'],
     )
 
-    refusal_dir = forge.compute_objective_behaviour_direction(
-        objective_behaviour_outputs=d_instr['obj_beh'],
-        antiobjective_outputs=d_instr['anti_obj'],
+    scorer = ExpressionRefusalScorer()
+
+    forge.free_memory([d_toks, d_instr])
+
+    refusal_dir = forge.find_approximate_best_objective_behaviour_direction(
+        model=model,
+        scorer=scorer,
+        eval_objective_behaviour_instructions=obj_beh[:max_inst],
+        eval_antiobjective_instructions=anti_obj[:max_inst],
+        min_layer=10,
+        max_layer=13,
     )
 
     conversations = forge.run_forged_model(
@@ -408,7 +449,6 @@ if __name__ == "__main__":
     )
 
     for conversation in conversations:
-        print('='*20)
+        print('=' * 20)
         for round in conversation:
             print(f'{round["role"]}: {round["content"]}')
-

@@ -4,10 +4,10 @@ from einops import einops
 
 
 class AblationDecoderLayer(torch.nn.Module):
-    def __init__(self, original_layer, direection):
+    def __init__(self, original_layer, direction):
         super(AblationDecoderLayer, self).__init__()
         self.original_layer = original_layer
-        self.objective_behaviour_dr = direection
+        self.objective_behaviour_dr = direction
 
     def forward(self, *args, **kwargs):
         hidden_states = args[0]
@@ -28,10 +28,10 @@ class AblationDecoderLayer(torch.nn.Module):
 
 
 class AdditionDecoderLayer(torch.nn.Module):
-    def __init__(self, original_layer, direection):
+    def __init__(self, original_layer, direction):
         super(AdditionDecoderLayer, self).__init__()
         self.original_layer = original_layer
-        self.objective_behaviour_dir = direection
+        self.objective_behaviour_dir = direction
 
     def forward(self, *args, **kwargs):
         hidden_states = args[0]
