@@ -162,8 +162,6 @@ class Forge:
             'anti_obj': antiobjective_outputs,
         }
 
-    def compute_objective_behaviour_metric(self):
-
     def find_approximate_best_objective_behaviour_direction(
             self,
             model: AutoModelForCausalLM | PreTrainedModel,
