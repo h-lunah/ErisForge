@@ -1,18 +1,15 @@
 import logging
 import random
-from random import sample
 from typing import List, Dict, Any, Type
 
 import torch
-from torch import Tensor, nn
+from torch import Tensor
 from tqdm import tqdm, trange
 from transformers import AutoTokenizer, PreTrainedTokenizerBase, AutoModelForCausalLM, TextStreamer, PreTrainedModel
 from transformers.generation import GenerateDecoderOnlyOutput
-from transformers.models.paligemma.convert_paligemma_weights_to_hf import device
 
 from src.layers import AblationDecoderLayer, AdditionDecoderLayer
 from src.scorers.base_scorer import BaseScorer
-from src.scorers.refusal_scorer.expression_refusal_scorer import ExpressionRefusalScorer
 
 
 class Forge:
@@ -179,6 +176,7 @@ class Forge:
     def find_approximate_best_objective_behaviour_direction(
             self,
             model: AutoModelForCausalLM | PreTrainedModel,
+            tokenizer: PreTrainedTokenizerBase | AutoTokenizer,
             scorer: BaseScorer,
             eval_objective_behaviour_instructions: List[str],
             eval_antiobjective_instructions: List[str],
@@ -301,6 +299,7 @@ class Forge:
 
     def compute_objective_behaviour_direction(
             self,
+            model: AutoModelForCausalLM | PreTrainedModel,
             objective_behaviour_outputs: List[GenerateDecoderOnlyOutput],
             antiobjective_outputs: List[GenerateDecoderOnlyOutput],
             layer: int | None = None,
@@ -390,65 +389,3 @@ class Forge:
             torch.cuda.empty_cache()
         elif self.device.type == 'mps':
             torch.mps.empty_cache()
-
-
-if __name__ == "__main__":
-    random.seed(42)
-    MODEL = 'google/gemma-1.1-2b-it'
-    with open("./harmful.txt", "r") as f:
-        obj_beh = f.readlines()
-
-    with open("./harmless.txt", "r") as f:
-        anti_obj = f.readlines()
-
-    max_inst = 100
-    # logging.basicConfig(level=logging.INFO)
-
-    forge = Forge()
-    forge.load_instructions(objective_behaviour_instructions=obj_beh, anti_behaviour_instructions=anti_obj)
-
-    tokenizer = AutoTokenizer.from_pretrained(MODEL, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(
-        MODEL,
-        trust_remote_code=True,
-        torch_dtype=torch.bfloat16,
-    ).to(forge.device)
-
-    d_toks = forge.tokenize_instructions(
-        tokenizer=tokenizer,
-        max_n_antiobjective_instruction=max_inst,
-        max_n_objective_behaviour_instruction=max_inst,
-    )
-
-    d_instr = forge.compute_output(
-        model=model,
-        objective_behaviour_tokenized_instructions=d_toks['objective_behaviour_tokens'],
-        anti_behaviour_tokenized_instructions=d_toks['antiobjective_tokens'],
-    )
-
-    scorer = ExpressionRefusalScorer()
-
-    forge.free_memory([d_toks, d_instr])
-
-    refusal_dir = forge.find_approximate_best_objective_behaviour_direction(
-        model=model,
-        scorer=scorer,
-        eval_objective_behaviour_instructions=obj_beh[:max_inst],
-        eval_antiobjective_instructions=anti_obj[:max_inst],
-        min_layer=10,
-        max_layer=13,
-    )
-
-    conversations = forge.run_forged_model(
-        model=model,
-        objective_behaviour_dir=refusal_dir,
-        tokenizer=tokenizer,
-        instructions=sample(population=obj_beh, k=20),
-        max_new_tokens=100,
-        stream=False,
-    )
-
-    for conversation in conversations:
-        print('=' * 20)
-        for round in conversation:
-            print(f'{round["role"]}: {round["content"]}')
