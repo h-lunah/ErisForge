@@ -216,6 +216,7 @@ class Forge:
         logging.info('Finding best objective_behaviour direction...')
         for layer_idx in trange(min_layer, max_layer, desc='Finding best objective_behaviour direction'):
             tmp_obj_beh_dir = self.compute_objective_behaviour_direction(
+                model=model,
                 objective_behaviour_outputs=d_out['obj_beh'],
                 antiobjective_outputs=d_out['anti_obj'],
                 layer=layer_idx,

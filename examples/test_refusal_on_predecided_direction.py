@@ -44,20 +44,23 @@ if __name__ == "__main__":
     forge.free_memory([d_toks, d_instr])
 
     # Currently, this piece of code probably causes a memory leak.
-    # refusal_dir = forge.find_approximate_best_objective_behaviour_direction(
-    #     model=model,
-    #     scorer=scorer,
-    #     eval_objective_behaviour_instructions=obj_beh[:max_inst],
-    #     eval_antiobjective_instructions=anti_obj[:max_inst],
-    #     min_layer=10,
-    #     max_layer=13,
-    # )
 
-    refusal_dir = forge.compute_objective_behaviour_direction(
-        objective_behaviour_outputs=d_instr['objective_behaviour_outputs'],
-        antiobjective_outputs=d_instr['antiobjective_outputs'],
-        layer=int(len(model.model.layers) * 0.65),
+    refusal_dir = forge.find_approximate_best_objective_behaviour_direction(
+        model=model,
+        tokenizer=tokenizer,
+        scorer=scorer,
+        eval_objective_behaviour_instructions=obj_beh[:max_inst],
+        eval_antiobjective_instructions=anti_obj[:max_inst],
+        min_layer=10,
+        max_layer=13,
     )
+
+    # refusal_dir = forge.compute_objective_behaviour_direction(
+    #     model=model,
+    #     objective_behaviour_outputs=d_instr['obj_beh'],
+    #     antiobjective_outputs=d_instr['anti_obj'],
+    #     layer=int(len(model.model.layers) * 0.65),
+    # )
 
     conversations = forge.run_forged_model(
         model=model,
