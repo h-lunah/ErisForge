@@ -1,10 +1,17 @@
 import random
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+)
 
-from src.eris_forge import Forge
-from src.scorers.refusal_scorer.expression_refusal_scorer import ExpressionRefusalScorer
+from src.eris_forge import (
+    Forge,
+)
+from src.scorers.refusal_scorer.expression_refusal_scorer import (
+    ExpressionRefusalScorer,
+)
 
 if __name__ == "__main__":
     random.seed(42)

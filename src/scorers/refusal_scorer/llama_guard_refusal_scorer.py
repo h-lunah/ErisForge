@@ -1,10 +1,17 @@
 import logging
-from typing import List
+from typing import (
+    List,
+)
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+)
 
-from src.scorers.base_scorer import BaseScorer
+from src.scorers.base_scorer import (
+    BaseScorer,
+)
 
 
 class LLamaGuardRefusalScorer(BaseScorer):

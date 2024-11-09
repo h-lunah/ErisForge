@@ -1,4 +1,8 @@
-from abc import ABC, abstractmethod
+from abc import (
+    ABC,
+    abstractmethod,
+)
+
 
 class BaseScorer(ABC):
     @abstractmethod

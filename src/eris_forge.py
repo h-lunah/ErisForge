@@ -1,20 +1,46 @@
 import logging
 import random
-from typing import List, Dict, Any, Type
+from typing import (
+    Any,
+    Dict,
+    List,
+    Type,
+)
 
 import torch
-from torch import Tensor
-from tqdm import tqdm, trange
-from transformers import AutoTokenizer, PreTrainedTokenizerBase, AutoModelForCausalLM, TextStreamer, PreTrainedModel
-from transformers.generation import GenerateDecoderOnlyOutput
+from torch import (
+    Tensor,
+)
+from tqdm import (
+    tqdm,
+    trange,
+)
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    PreTrainedModel,
+    PreTrainedTokenizerBase,
+    TextStreamer,
+)
+from transformers.generation import (
+    GenerateDecoderOnlyOutput,
+)
 
-from src.layers import AblationDecoderLayer, AdditionDecoderLayer
-from src.scorers.base_scorer import BaseScorer
+from src.layers import (
+    AblationDecoderLayer,
+    AdditionDecoderLayer,
+)
+from src.scorers.base_scorer import (
+    BaseScorer,
+)
 
 
 class Forge:
 
     def __init__(self):
+        """
+        Initializes the Forge object.
+        """
         self.max_toks = 1
         self.max_iterations: int = 0
         self.objective_behaviour_instructions: List[str] = []
@@ -29,7 +55,13 @@ class Forge:
             logging.info("CPU is available.")
             self.device = torch.device("cpu")
 
-    def load_instructions(self, objective_behaviour_instructions: List[str], anti_behaviour_instructions: List[str]):
+    def load_instructions(self, objective_behaviour_instructions: List[str], anti_behaviour_instructions: List[str]) -> None:
+        """
+        Loads the instructions for the Forge object.
+        :param objective_behaviour_instructions: List of the instructions asking the model to perform the behaviour you want.
+        :param anti_behaviour_instructions: List of instructions that ask the model to perform random, usual, tasks.
+        :return: None
+        """
         logging.info(
             f"Loading instructions, objective_behaviour: {len(objective_behaviour_instructions)}, antiobjective: {len(anti_behaviour_instructions)}")
         self.objective_behaviour_instructions: List[str] = objective_behaviour_instructions
@@ -40,6 +72,13 @@ class Forge:
 
     @staticmethod
     def _tokenize(tokenizer: PreTrainedTokenizerBase, instruction: str, bar: tqdm | None = None) -> torch.Tensor:
+        """
+        Tokenizes the instruction.
+        :param tokenizer: Tokenizer for a particular model.
+        :param instruction: Instruction to be tokenized.
+        :param bar: Progress bar object.
+        :return: Tokenized instruction in the form of a tensor.
+        """
         tokens: torch.Tensor = tokenizer.apply_chat_template(
             conversation=[{"role": "user", "content": instruction}],
             add_generation_prompt=True,
@@ -57,6 +96,13 @@ class Forge:
             max_n_objective_behaviour_instruction: int | None = None,
             max_n_antiobjective_instruction: int | None = None,
     ) -> Dict[str, List[Tensor]]:
+        """
+        Tokenizes the instructions.
+        :param tokenizer: Tokenizer for a particular model.
+        :param max_n_objective_behaviour_instruction: Maximum number of objective_behaviour instructions to be tokenized.
+        :param max_n_antiobjective_instruction: Maximum number of antiobjective instructions to be tokenized.
+        :return: Dictionary containing tokenized objective_behaviour and antiobjective instructions.
+        """
         if isinstance(tokenizer, str):
             logging.info(f"Loading tokenizer from {tokenizer}")
             tokenizer = AutoTokenizer.from_pretrained(tokenizer, trust_remote_code=True)
@@ -106,6 +152,15 @@ class Forge:
             n_generated_tokens: int = 1,
             streamer: TextStreamer | None = None,
     ) -> GenerateDecoderOnlyOutput:
+        """
+        Generates new tokens given a prompt.
+        :param model: A HuggingFace model.
+        :param tokens: Tokenized instruction.
+        :param bar: Progress bar object.
+        :param n_generated_tokens: Number of tokens to generate.
+        :param streamer: TextStreamer object, used for showing the text generation.
+        :return: Generated tokens.
+        """
         if bar:
             bar.update(n=1)
 
@@ -129,6 +184,13 @@ class Forge:
             objective_behaviour_tokenized_instructions: List[Tensor],
             anti_behaviour_tokenized_instructions: List[Tensor],
     ) -> Dict[str, List[GenerateDecoderOnlyOutput]]:
+        """
+        Computes the output for the given instructions.
+        :param model: A HuggingFace model.
+        :param objective_behaviour_tokenized_instructions: Tokenized objective_behaviour instructions.
+        :param anti_behaviour_tokenized_instructions: Tokenized antiobjective instructions.
+        :return: Dictionary containing the outputs for the given instructions.
+        """
         if isinstance(model, str):
             logging.info(f"Loading model from {model}")
             model: AutoModelForCausalLM = AutoModelForCausalLM.from_pretrained(
@@ -183,6 +245,17 @@ class Forge:
             min_layer: int | None = None,
             max_layer: int | None = None,
     ) -> Tensor:
+        """
+        Finds the approximate best objective_behaviour direction, given the model, tokenizer, scorer, instructions and the layers.
+        :param model: A HuggingFace model.
+        :param tokenizer: Tokenizer for a particular model.
+        :param scorer: Scorer object.
+        :param eval_objective_behaviour_instructions: Instructions for evaluating the objective_behaviour.
+        :param eval_antiobjective_instructions: Instructions for evaluating the antiobjective.
+        :param min_layer: First layer to be considered for computing the best direction.
+        :param max_layer: Last layer to be considered for computing the best direction.
+        :return: The approximate best objective_behaviour direction.
+        """
         if min_layer is None:
             min_layer = max(int(len(model.model.layers) * 0.2), 1)
         if max_layer is None:
@@ -283,7 +356,16 @@ class Forge:
             min_layer: int,
             model: AutoModelForCausalLM | PreTrainedModel,
             direction: Tensor,
-    ):
+    ) -> AutoModelForCausalLM | PreTrainedModel:
+        """
+        Replaces the layers of the model.
+        :param new_layer: Type of layer to be replaced.
+        :param max_layer: Maximum layer to be replaced.
+        :param min_layer: Minimum layer to be replaced.
+        :param model: A HuggingFace model.
+        :param direction: Direction tensor.
+        :return: Model with replaced layers.
+        """
         for layer_idx in trange(min_layer, max_layer, desc='Ablating model layers'):
             if isinstance(model.model.layers[layer_idx], AblationDecoderLayer) or isinstance(
                     model.model.layers[layer_idx], AdditionDecoderLayer):
@@ -305,6 +387,14 @@ class Forge:
             antiobjective_outputs: List[GenerateDecoderOnlyOutput],
             layer: int | None = None,
     ) -> Tensor:
+        """
+        Computes the objective_behaviour direction given a layer.
+        :param model: A HuggingFace model.
+        :param objective_behaviour_outputs: Objective_behaviour outputs.
+        :param antiobjective_outputs: Antiobjective outputs.
+        :param layer: Layer to be considered for computing the objective_behaviour direction.
+        :return: Objective_behaviour direction.
+        """
         if layer is None:
             layer = int(len(model.model.layers) * 0.6)
         objective_behaviour_mean = torch.stack(
@@ -332,6 +422,20 @@ class Forge:
             max_new_tokens: int = 100,
             stream: bool = False,
     ) -> List[List[Dict[str, Any]]]:
+        """
+        Runs the forged model.
+        :param model: A HuggingFace model.
+        :param objective_behaviour_dir: Objective_behaviour direction.
+        :param tokenizer: Tokenizer for a particular model.
+        :param type_of_layer: Type of layer to be replaced.
+        :param min_layer: Minimum layer to be replaced.
+        :param max_layer: Maximum layer to be replaced.
+        :param instructions: Instructions to be used for the forged model.
+        :param tokenized_instructions: Tokenized instructions to be used for the forged model.
+        :param max_new_tokens: Maximum number of tokens to be generated.
+        :param stream: Whether to show as text the generation.
+        :return: List of conversations.
+        """
 
         if min_layer is None:
             min_layer = max(int(len(model.model.layers) * 0.2), 1)

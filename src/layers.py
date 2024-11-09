@@ -1,6 +1,8 @@
+from einops import (
+    einops,
+)
 import jaxtyping
 import torch
-from einops import einops
 
 
 class AblationDecoderLayer(torch.nn.Module):

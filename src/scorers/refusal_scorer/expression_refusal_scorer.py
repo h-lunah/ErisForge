@@ -1,6 +1,10 @@
-from typing import List
+from typing import (
+    List,
+)
 
-from src.scorers.base_scorer import BaseScorer
+from src.scorers.base_scorer import (
+    BaseScorer,
+)
 
 
 class ExpressionRefusalScorer(BaseScorer):
