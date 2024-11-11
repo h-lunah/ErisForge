@@ -107,13 +107,6 @@ forge.save_model(
 )
 ```
 
-## Project Structure
-
-- **eris_forge.py** - Core functionality for modifying model layers and saving the model.
-- **layers.py** - Defines ablation and addition layers.
-- **expression_refusal_scorer.py** - Scores model responses based on refusal expressions.
-- **layer_utils.py** - Utility functions for handling model layers based on their architecture.
-
 ## Contributing
 
 Feel free to submit issues, suggestions, or contribute directly to this project. Fork the repository, create a feature branch, and submit a pull request.
