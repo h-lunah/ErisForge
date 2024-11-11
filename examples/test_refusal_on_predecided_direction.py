@@ -69,16 +69,27 @@ if __name__ == "__main__":
         layer=int(len(model.model.layers) * 0.65),
     )
 
-    conversations = forge.run_forged_model(
-        model=model,
-        objective_behaviour_dir=refusal_dir,
-        tokenizer=tokenizer,
-        instructions=random.sample(population=obj_beh, k=20),
-        max_new_tokens=100,
-        stream=False,
-    )
+    # conversations = forge.run_forged_model(
+    #     model=model,
+    #     objective_behaviour_dir=refusal_dir,
+    #     tokenizer=tokenizer,
+    #     instructions=random.sample(population=obj_beh, k=20),
+    #     max_new_tokens=100,
+    #     stream=False,
+    # )
+    #
+    # for conversation in conversations:
+    #     print('=' * 20)
+    #     for round in conversation:
+    #         print(f'{round["role"]}: {round["content"]}')
+    #
+    # forge.free_memory([conversations, d_toks, d_instr])
 
-    for conversation in conversations:
-        print('=' * 20)
-        for round in conversation:
-            print(f'{round["role"]}: {round["content"]}')
+    forge.save_model(
+        model=model,
+        tokenizer=tokenizer,
+        behaviour_dir=refusal_dir,
+        output_model_name='corrupted_gemma_test',
+        to_hub=False,
+        model_architecture='gemma',
+    )

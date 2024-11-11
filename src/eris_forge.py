@@ -26,13 +26,29 @@ from transformers.generation import (
     GenerateDecoderOnlyOutput,
 )
 
-from src.layers import (
+from src.layers.layers import (
     AblationDecoderLayer,
     AdditionDecoderLayer,
 )
 from src.scorers.base_scorer import (
     BaseScorer,
 )
+from src.utils.layer_utils import (
+    get_layers_names_by_model,
+    identify_model,
+)
+
+def modify_tensor(tensor_data, refusal_dir, scale_factor: float = 1.0):
+    assert scale_factor <= 1.0, "Using a scale_factor of > 1 doesn't make sense..."
+    tensor_float32 = tensor_data.to(torch.float32)
+    refusal_dir_float32 = refusal_dir.to(torch.float32)
+    # Ensure refusal_dir is a 1-dimensional tensor
+    if refusal_dir_float32.dim() > 1:
+        refusal_dir_float32 = refusal_dir_float32.view(-1)
+    tensor_float32 -= scale_factor * torch.matmul(torch.outer(refusal_dir_float32, refusal_dir_float32), tensor_float32)
+    tensor_modified = tensor_float32.to(torch.bfloat16)
+    return torch.nn.Parameter(tensor_modified)
+
 
 
 class Forge:
@@ -488,7 +504,114 @@ class Forge:
 
         return conversations
 
+    @staticmethod
+    def _modify_tensor(
+            tensor: Tensor,
+            behaviour_dir: Tensor,
+            scale_factor: float = 1.0,
+    ) -> Tensor:
+        """
+        Modifies the tensor applying the behaviour direction.
+        :param tensor: Tensor to be modified.
+        :param behaviour_dir: Behaviour direction.
+        :param scale_factor: Scale factor, must be between -1.0 and 1.0. If negative, induces the behaviour.
+        :return: Modified tensor.
+        """
+        if abs(scale_factor) > 1.0:
+            raise ValueError("The scale factor must be between -1.0 and 1.0.")
+
+        tensor_float32 = tensor.to(torch.float32)
+        refusal_dir_float32 = behaviour_dir.to(torch.float32)
+
+        if refusal_dir_float32.dim() > 1:
+            refusal_dir_float32 = refusal_dir_float32.view(-1)
+
+        tensor_float32 -= scale_factor * torch.matmul(
+            input=torch.outer(
+                input=refusal_dir_float32,
+                vec2=refusal_dir_float32,
+            ),
+            other=tensor_float32,
+        )
+        tensor_modified = tensor_float32.to(torch.bfloat16)
+
+        return torch.nn.Parameter(tensor_modified)
+
+    def save_model(
+            self,
+            model: AutoModelForCausalLM | PreTrainedModel,
+            behaviour_dir: Tensor,
+            scale_factor: float = 1.0,
+            min_layer: int | None = None,
+            max_layer: int | None = None,
+            output_model_name: str = None,
+            tokenizer: PreTrainedTokenizerBase | AutoTokenizer = None,
+            to_hub: bool = False,
+            model_architecture: str = 'gemma',
+    ) -> AutoModelForCausalLM | PreTrainedModel:
+        """
+        Modifies the layers and saves the model (to disk or to the HuggingFace Hub).
+        :param model: A HuggingFace model.
+        :param behaviour_dir: Behaviour direction.
+        :param scale_factor: Scale factor, must be between -1.0 and 1.0. If negative, induces the behaviour.
+        :param min_layer: Minimum layer to be modified.
+        :param max_layer: Maximum layer to be modified.
+        :param output_model_name: Name of the (new) model, useful if pushed to hub or saved somewhere.
+        :param tokenizer: Tokenizer for a particular model, useful if pushed to hub or saved somewhere.
+        :param to_hub: Whether to push the model to the HuggingFace Hub.
+        :param model_architecture: Model architecture, needed to identify what are the layers to be modified. If not specified, will try to find the layers to be modified by trying all possibilities.
+        :return: Modified model.
+        """
+        if abs(scale_factor) > 1.0:
+            raise ValueError("The scale factor must be between -1.0 and 1.0.")
+        if not model_architecture:
+            logging.warning('No model architecture provided. Trying to identify the model architecture based on the layer names.')
+            model_architecture = identify_model(model.model)
+        layer_names = get_layers_names_by_model(model_architecture.lower())
+        custom_model = model.model
+
+        if min_layer is None:
+            min_layer = max(int(len(model.model.layers) * 0.2), 2)
+        if max_layer is None:
+            max_layer = min(int(len(model.model.layers) * 0.8), len(model.model.layers) - 3)
+
+        for layer_idx in range(min_layer, max_layer):
+            layer = custom_model.layers[layer_idx]
+            for attr_path in layer_names.values():
+                parts = attr_path.split('.')
+                target = layer
+                for part in parts[:-1]:
+                    target = getattr(target, part)
+
+                weight_attr = getattr(target, parts[-1])
+                modified_weight = self._modify_tensor(
+                    tensor=weight_attr,
+                    behaviour_dir=behaviour_dir,
+                    scale_factor=scale_factor,
+                )
+                setattr(target, parts[-1], torch.nn.Parameter(modified_weight))
+        if output_model_name:
+            model.save_pretrained(
+                output_model_name,
+                push_to_hub=to_hub,
+            )
+            if tokenizer:
+                tokenizer.save_pretrained(
+                    output_model_name,
+                    push_to_hub=to_hub,
+                )
+        else:
+            logging.warning('No output model name provided. Model not saved to disk nor pushed to hub.')
+
+        return model
+
     def free_memory(self, list_of_variables: List[Any]):
+        """
+        Frees the memory.
+        :param list_of_variables: List of variables to be deleted.
+        :return: None
+        """
+        logging.warning(f'Freeing memory for {len(list_of_variables)} variables.')
         del list_of_variables
         if self.device.type == 'cuda':
             torch.cuda.empty_cache()
