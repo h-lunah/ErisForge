@@ -16,10 +16,10 @@ from src.scorers.refusal_scorer.expression_refusal_scorer import (
 if __name__ == "__main__":
     random.seed(42)
     MODEL = 'google/gemma-1.1-2b-it'
-    with open("../src/harmful.txt", "r") as f:
+    with open("../src/assets/harmful_instructions.txt", "r") as f:
         obj_beh = f.readlines()
 
-    with open("../src/harmless.txt", "r") as f:
+    with open("../src/assets/harmless_instructions.txt", "r") as f:
         anti_obj = f.readlines()
 
     max_inst = 100
