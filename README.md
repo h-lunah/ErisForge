@@ -13,7 +13,7 @@
 To install ErisForge, clone the repository and install the required packages:
 
 ```bash
-git clone https://github.com/yourusername/erisforge.git
+git clone https://github.com/tsadoq/erisforge.git
 cd erisforge
 pip install -r requirements.txt
 ```
