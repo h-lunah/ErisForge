@@ -121,6 +121,8 @@ This project was inspired by and built upon the work from the following reposito
 
 Feel free to submit issues, suggestions, or contribute directly to this project. Fork the repository, create a feature branch, and submit a pull request.
 
+[Issues and Feature Requests](https://github.com/Tsadoq/ErisForge/issues)
+
 ## License
 
 This project is licensed under the MIT License.
