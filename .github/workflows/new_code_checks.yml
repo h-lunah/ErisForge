@@ -37,10 +37,10 @@ jobs:
           ruff format .
           ruff check --fix .
       - name: Run Tests
-        env:
-          SUPER_SECRET: ${{ secrets.HF_TOKEN }}
         run: |
           python -m unittest
+        env:
+          SUPER_SECRET: ${{ secrets.HF_TOKEN }}
       - name: Run Coverage with coverage.py
         run: |
           coverage run -m unittest
