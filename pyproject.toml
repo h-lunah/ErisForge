@@ -15,12 +15,8 @@ dynamic = ["dependencies"]
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}
+classifiers = ["Programming Language :: Python :: 3", "License :: OSI Approved :: MIT License"]
 
-
-classifiers = [
-    "Programming Language :: Python :: 3",
-    "Operating System :: OS Independent",
-]
 
 [project.urls]
 "Homepage" = "https://github.com/Tsadoq/ErisForge"
