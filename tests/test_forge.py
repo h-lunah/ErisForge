@@ -19,7 +19,9 @@ class TestForge(unittest.TestCase):
     def setUp(self):
         self.forge = Forge()
         self.model_name = "google/gemma-1.1-2b-it"
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, token=os.environ["HF_TOKEN"])
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            self.model_name, token=os.environ["HF_TOKEN"]
+        )
         self.model = MagicMock(spec=AutoModelForCausalLM)
         self.model.to = MagicMock(return_value=self.model)
         self.model.generate = MagicMock(return_value=MagicMock())
