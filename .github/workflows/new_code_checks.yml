@@ -36,7 +36,6 @@ jobs:
           isort .
           ruff format .
           ruff check --fix .
-
       - name: Run Tests
         run: |
           python -m unittest
