@@ -18,9 +18,10 @@ from erisforge.eris_forge import (
 class TestForge(unittest.TestCase):
     def setUp(self):
         self.forge = Forge()
-        self.model_name = "google/gemma-1.1-2b-it"
+        self.model_name = "microsoft/Phi-3-small-128k-instruct"
         self.tokenizer = AutoTokenizer.from_pretrained(
-            self.model_name, token=os.environ["HF_TOKEN"]
+            self.model_name,
+            trust_remote_code=True,
         )
         self.model = MagicMock(spec=AutoModelForCausalLM)
         self.model.to = MagicMock(return_value=self.model)

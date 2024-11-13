@@ -39,8 +39,6 @@ jobs:
       - name: Run Tests
         run: |
           python -m unittest
-        env:
-          SUPER_SECRET: ${{ secrets.HF_TOKEN }}
       - name: Run Coverage with coverage.py
         run: |
           coverage run -m unittest
