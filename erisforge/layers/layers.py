@@ -1,12 +1,11 @@
 from einops import (
     einops,
 )
-import jaxtyping
+
 import torch
 
 
 class AblationDecoderLayer(torch.nn.Module):
-
     def __init__(self, original_layer, direction):
         """
         Initialize the AblationDecoderLayer.
@@ -34,8 +33,8 @@ class AblationDecoderLayer(torch.nn.Module):
 
     @staticmethod
     def _direction_ablation_hook(
-            activation: jaxtyping.Float[torch.Tensor, "... d_act"],
-            direction: jaxtyping.Float[torch.Tensor, "d_act"]
+        activation: torch.Tensor,
+        direction: torch.Tensor,
     ) -> torch.Tensor:
         """
         Ablation hook for the AblationDecoderLayer.
@@ -43,7 +42,14 @@ class AblationDecoderLayer(torch.nn.Module):
         :param direction: the direction of the ablation
         :return: the ablated activation
         """
-        proj = einops.einsum(activation, direction.view(-1, 1), '... d_act, d_act single -> ... single') * direction
+        proj = (
+            einops.einsum(
+                activation,
+                direction.view(-1, 1),
+                "... d_act, d_act single -> ... single",
+            )
+            * direction
+        )
         return activation - proj
 
 
@@ -75,8 +81,8 @@ class AdditionDecoderLayer(torch.nn.Module):
 
     @staticmethod
     def _direction_addition_hook(
-            activation: jaxtyping.Float[torch.Tensor, "... d_act"],
-            direction: jaxtyping.Float[torch.Tensor, "d_act"]
+        activation: torch.Tensor,
+        direction: torch.Tensor,
     ) -> torch.Tensor:
         """
         Addition hook for the AdditionDecoderLayer.
@@ -85,4 +91,3 @@ class AdditionDecoderLayer(torch.nn.Module):
         :return: the added activation
         """
         return activation + direction
-

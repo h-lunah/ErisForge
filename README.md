@@ -47,6 +47,7 @@ scorer = ExpressionRefusalScorer()
 ### Transform Model Layers
 
 You can apply transformations to specific layers of the model to induce different response behaviors.
+A complete example can be found in this notebook: [Transform Model Layers](examples/example_run_forge_refusal_dir.ipynb).
 
 #### Example 1: Applying Ablation to Model Layers
 
@@ -106,6 +107,15 @@ forge.save_model(
     to_hub=False  # Set to True to push to HuggingFace Hub
 )
 ```
+
+## Acknowledgments
+
+This project was inspired by and built upon the work from the following repositories and projects:
+
+- [Removing refusals with HF Transformers](https://github.com/Sumandora/remove-refusals-with-transformers)
+- [Ablation Blog post on Huggingface](https://huggingface.co/blog/mlabonne/abliteration)
+- [DECCP](https://github.com/AUGMXNT/deccp)
+- [AbliteratorV3](https://github.com/FailSpy/abliterator)
 
 ## Contributing
 
