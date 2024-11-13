@@ -126,3 +126,6 @@ Feel free to submit issues, suggestions, or contribute directly to this project.
 ## License
 
 This project is licensed under the MIT License.
+
+## Disclaimer
+**Disclaimer**: This library is provided for research and development purposes only. The author assumes no responsibility for any specific applications or uses of ErisForge.
