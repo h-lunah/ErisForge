@@ -47,6 +47,7 @@ scorer = ExpressionRefusalScorer()
 ### Transform Model Layers
 
 You can apply transformations to specific layers of the model to induce different response behaviors.
+A complete example can be found in this notebook: [Transform Model Layers](examples/example_run_forge_refusal_dir.ipynb).
 
 #### Example 1: Applying Ablation to Model Layers
 
@@ -107,10 +108,24 @@ forge.save_model(
 )
 ```
 
+## Acknowledgments
+
+This project was inspired by and built upon the work from the following repositories and projects:
+
+- [Removing refusals with HF Transformers](https://github.com/Sumandora/remove-refusals-with-transformers)
+- [Ablation Blog post on Huggingface](https://huggingface.co/blog/mlabonne/abliteration)
+- [DECCP](https://github.com/AUGMXNT/deccp)
+- [AbliteratorV3](https://github.com/FailSpy/abliterator)
+
 ## Contributing
 
 Feel free to submit issues, suggestions, or contribute directly to this project. Fork the repository, create a feature branch, and submit a pull request.
 
+[Issues and Feature Requests](https://github.com/Tsadoq/ErisForge/issues)
+
 ## License
 
 This project is licensed under the MIT License.
+
+## Disclaimer
+**Disclaimer**: This library is provided for research and development purposes only. The author assumes no responsibility for any specific applications or uses of ErisForge.

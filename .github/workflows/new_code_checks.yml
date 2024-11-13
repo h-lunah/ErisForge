@@ -1,0 +1,41 @@
+name: ErisForge
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v3
+        with:
+          python-version: "3.11"
+          cache: 'pip'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install ruff isort coverage
+          sudo apt update
+      - name: Run Linters and Formatters
+        run: |
+          isort .
+          ruff format .
+          ruff check --fix .
+      - name: Run Tests
+        run: |
+          python -m unittest
