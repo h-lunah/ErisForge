@@ -554,7 +554,7 @@ class Forge:
                 )
                 for instr_token in instr_tokens
             ]
-
+        self.free_memory([new_model])
         conversations: List[List[Dict[str, Any]]] = []
         for enc_resp, instr in zip(encoded_responses, instructions):
             conversations.append(
@@ -689,7 +689,9 @@ class Forge:
         :return: None
         """
         logging.warning(f"Freeing memory for {len(list_of_variables)} variables.")
-        del list_of_variables
+        for var in list_of_variables:
+            del var
+            del list_of_variables
         if self.device.type == "cuda":
             torch.cuda.empty_cache()
         elif self.device.type == "mps":
