@@ -645,15 +645,18 @@ class Forge:
             max_layer = min(
                 int(len(model.model.layers) * 0.8), len(model.model.layers) - 3
             )
-
         for layer_idx in range(min_layer, max_layer):
             layer = custom_model.layers[layer_idx]
+
+            # If the layer is an AblationDecoderLayer, work with its original_layer.
+            if hasattr(layer, "original_layer"):
+                layer = layer.original_layer
+
             for attr_path in layer_names.values():
                 parts = attr_path.split(".")
                 target = layer
                 for part in parts[:-1]:
                     target = getattr(target, part)
-
                 weight_attr = getattr(target, parts[-1])
                 modified_weight = self._modify_tensor(
                     tensor=weight_attr,
@@ -661,6 +664,7 @@ class Forge:
                     scale_factor=scale_factor,
                 )
                 setattr(target, parts[-1], torch.nn.Parameter(modified_weight))
+
         if output_model_name:
             model.save_pretrained(
                 output_model_name,

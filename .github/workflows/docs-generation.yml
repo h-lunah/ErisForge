@@ -22,7 +22,7 @@ jobs:
       - run: pip install pdoc
       - run: pdoc -d restructuredtext erisforge -o docs/
 
-      - uses: actions/upload-pages-artifact@v2
+      - uses: actions/upload-pages-artifact@v4
         with:
           path: docs/
 
