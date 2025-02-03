@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ErisForge"
-version = "0.0.2"
+version = "1.0.1"
 authors = [
     { name = "Matteo Villosio", email = "github@matteovillosio.com" },
 ]
@@ -16,6 +16,9 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License"
 ]
+
+[tool.setuptools]
+include-package-data = true
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}
