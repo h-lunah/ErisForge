@@ -1,3 +1,4 @@
+import gc
 import logging
 import random
 from typing import (
@@ -101,10 +102,8 @@ class Forge:
             add_generation_prompt=True,
             return_tensors="pt",
         )
-
         if bar:
             bar.update(n=1)
-
         return tokens
 
     def tokenize_instructions(
@@ -215,7 +214,8 @@ class Forge:
         if streamer:
             params["streamer"] = streamer
 
-        output = model.generate(**params)
+        with torch.inference_mode(), torch.autocast(device_type=self.device.type):
+            output = model.generate(**params)
         return output
 
     def compute_output(
@@ -403,7 +403,9 @@ class Forge:
                     "dir": tmp_obj_beh_dir,
                 }
             )
-        score_x_layer = sorted(score_x_layer, key=lambda x: x["score"], reverse=True)
+        score_x_layer = sorted(
+            score_x_layer, key=lambda x: x["score"], reverse=True
+        )
         return score_x_layer[0]["dir"]
 
     def _replace_layers(
@@ -455,18 +457,20 @@ class Forge:
         """
         if layer is None:
             layer = int(len(model.model.layers) * 0.6)
-        objective_behaviour_mean = torch.stack(
-            [
-                output.hidden_states[0][layer][:, -self.max_toks :, :].mean(dim=1)
-                for output in objective_behaviour_outputs
-            ]
-        ).mean(dim=0)
-        antiobjective_mean = torch.stack(
-            [
-                output.hidden_states[0][layer][:, -self.max_toks :, :].mean(dim=1)
-                for output in antiobjective_outputs
-            ]
-        ).mean(dim=0)
+
+        with torch.inference_mode(), torch.autocast(device_type=self.device.type):
+            objective_behaviour_mean = torch.stack(
+                [
+                    output.hidden_states[0][layer][:, -self.max_toks :, :].mean(dim=1)
+                    for output in objective_behaviour_outputs
+                ]
+            ).mean(dim=0)
+            antiobjective_mean = torch.stack(
+                [
+                    output.hidden_states[0][layer][:, -self.max_toks :, :].mean(dim=1)
+                    for output in antiobjective_outputs
+                ]
+            ).mean(dim=0)
 
         objective_behaviour_dir = objective_behaviour_mean - antiobjective_mean
         objective_behaviour_dir = (
@@ -542,19 +546,23 @@ class Forge:
 
         logging.info("Generating tokens for newly forged model.")
         with tqdm(
-            total=len(instructions), desc="Generating tokens for newly forged model"
+            total=len(instructions),
+            desc="Generating tokens for newly forged model",
         ) as bar:
-            encoded_responses = [
-                self._generate_new_tokens(
-                    model=new_model,
-                    tokens=instr_token,
-                    bar=bar,
-                    n_generated_tokens=max_new_tokens,
-                    streamer=TextStreamer(tokenizer) if stream else None,
-                )
-                for instr_token in instr_tokens
-            ]
+            with torch.inference_mode(), torch.autocast(device_type=self.device.type):
+                encoded_responses = [
+                    self._generate_new_tokens(
+                        model=new_model,
+                        tokens=instr_tok,
+                        bar=bar,
+                        n_generated_tokens=max_new_tokens,
+                        streamer=TextStreamer(tokenizer) if stream else None,
+                    )
+                    for instr_tok in instr_tokens
+                ]
+
         self.free_memory([new_model])
+
         conversations: List[List[Dict[str, Any]]] = []
         for enc_resp, instr in zip(encoded_responses, instructions):
             conversations.append(
@@ -690,8 +698,11 @@ class Forge:
         """
         logging.warning(f"Freeing memory for {len(list_of_variables)} variables.")
         for var in list_of_variables:
-            del var
-            del list_of_variables
+            try:
+                del var
+            except Exception as e:
+                logging.error(f"Error deleting variable: {e}")
+        gc.collect()
         if self.device.type == "cuda":
             torch.cuda.empty_cache()
         elif self.device.type == "mps":
