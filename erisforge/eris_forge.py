@@ -214,7 +214,7 @@ class Forge:
         if streamer:
             params["streamer"] = streamer
 
-        with torch.inference_mode(), torch.autocast(device_type=self.device.type):
+        with torch.inference_mode():
             output = model.generate(**params)
         return output
 
@@ -458,7 +458,7 @@ class Forge:
         if layer is None:
             layer = int(len(model.model.layers) * 0.6)
 
-        with torch.inference_mode(), torch.autocast(device_type=self.device.type):
+        with torch.inference_mode():
             objective_behaviour_mean = torch.stack(
                 [
                     output.hidden_states[0][layer][:, -self.max_toks :, :].mean(dim=1)
@@ -549,7 +549,7 @@ class Forge:
             total=len(instructions),
             desc="Generating tokens for newly forged model",
         ) as bar:
-            with torch.inference_mode(), torch.autocast(device_type=self.device.type):
+            with torch.inference_mode():
                 encoded_responses = [
                     self._generate_new_tokens(
                         model=new_model,
