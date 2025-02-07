@@ -1,3 +1,5 @@
+import time
+import platform
 import gc
 import logging
 import random
@@ -41,12 +43,13 @@ from erisforge.utils.layer_utils import (
 
 
 class Forge:
-    def __init__(self):
+    def __init__(self, batch_size: int = 10):
         """
         Initializes the Forge object.
         """
         self.max_toks = 1
         self.max_iterations: int = 0
+        self.batch_size: int = batch_size
         self.objective_behaviour_instructions: List[str] = []
         self.anti_behaviour_instructions: List[str] = []
         if torch.backends.mps.is_available():
@@ -97,13 +100,26 @@ class Forge:
         :param bar: Progress bar object.
         :return: Tokenized instruction in the form of a tensor.
         """
-        tokens: torch.Tensor = tokenizer.apply_chat_template(
-            conversation=[{"role": "user", "content": instruction}],
-            add_generation_prompt=True,
-            return_tensors="pt",
-        )
+        try:
+            tokens: torch.Tensor = tokenizer.apply_chat_template(
+                conversation=[{"role": "user", "content": instruction}],
+                add_generation_prompt=True,
+                return_tensors="pt",
+            )
+        except ValueError:
+            logging.error(
+                "Warning: your model's tokenizer does not support "
+                "chat templates. It is likely not trained as an AI"
+                " assistant. Results may be unexpected or useless."
+                " Falling back to default template.",
+            )
+            tokens: torch.Tensor = tokenizer.encode(
+                f"User query: {instruction}\nAI Assistant: ",
+                return_tensors="pt",
+            )
         if bar:
             bar.update(n=1)
+
         return tokens
 
     def tokenize_instructions(
@@ -279,7 +295,83 @@ class Forge:
             "anti_obj": antiobjective_outputs,
         }
 
-    def find_approximate_best_objective_behaviour_direction(
+
+    def _print_memory_usage(prefix: str="") -> None:
+        """
+        Prints memory usage to better track what is going on under the hood.
+        :param prefix: The prefix for the GPU.
+        :return: Nonw
+        """
+
+        if torch.cuda.is_available():  # Check for CUDA (NVIDIA GPU)
+            allocated = torch.cuda.memory_allocated()
+            cached = torch.cuda.memory_reserved()
+            free = torch.cuda.mem_get_info(0)[0]
+
+            print(f"{prefix}GPU Allocated: {allocated / 1024**3:.2f} GB")
+            print(f"{prefix}GPU Cached: {cached / 1024**3:.2f} GB")
+            print(f"{prefix}GPU Free: {free / 1024**3:.2f} GB")
+            print(f"{prefix}GPU Total: {(allocated + free) / 1024**3:.2f} GB")
+
+        elif platform.system() == "Darwin":  # Check for macOS (Apple Silicon or Intel)
+            try:
+                import psutil
+
+                process = psutil.Process()
+                mem_info = process.memory_info()
+                used_memory = mem_info.rss / (1024 ** 3)  # Resident Set Size
+                available_memory = psutil.virtual_memory().available / (1024 ** 3)
+
+                print(f"{prefix}System Used Memory: {used_memory:.2f} GB")
+                print(f"{prefix}System Available Memory: {available_memory:.2f} GB")
+                print(f"{prefix}System Total Memory: {(used_memory + available_memory):.2f} GB")
+
+            except ImportError:
+                print(f"{prefix}psutil not found. Cannot display system memory usage. Install with: pip install psutil")
+            except Exception as e:
+                print(f"{prefix}Error getting system memory info: {e}")
+
+        else:
+            print(f"{prefix}Neither CUDA nor macOS detected. Cannot determine memory usage.")
+
+
+    def _check_memory_usage(threshold=0.8):
+        """Checks memory usage (GPU or CPU) and prints a warning if above threshold."""
+
+        if torch.cuda.is_available():
+            allocated = torch.cuda.memory_allocated()
+            total = torch.cuda.mem_get_info(0)[1]  # Total GPU memory
+            used_percentage = (allocated / total) if total > 0 else 0 # avoid division by zero
+
+            if used_percentage > 0.8:
+                logging.warning(f"GPU memory usage above {0.8*100:.0f}%: {used_percentage*100:.0f}% used.")
+
+
+        elif platform.system() == "Darwin":  # macOS
+            try:
+                import psutil
+
+                process = psutil.Process()
+                mem_info = process.memory_info()
+                used_memory = mem_info.rss / (1024 ** 3)  # Resident Set Size
+                available_memory = psutil.virtual_memory().available / (1024 ** 3)
+
+                # print(f"\n=========================== USED GPU MEMORY: {(used_memory/(used_memory+available_memory)*100):.0f}% ===========================\n")
+
+                if float(used_memory/(used_memory+available_memory)) > float(0.8):
+                    logging.warning(f"System memory usage above {0.8*100:.0f}%: {(used_memory/(used_memory+available_memory)*100):.0f}% used.")
+
+            except ImportError:
+                logging.warning("psutil not found. Cannot check system memory usage. Install with: pip install psutil")
+            except Exception as e:
+                logging.warning(f"Error getting system memory info: {e}")
+
+        else:
+            logging.warning("Neither CUDA nor macOS detected. Cannot determine memory usage.")
+
+
+
+    def approx_best_objective_behaviour_dir(
         self,
         model: AutoModelForCausalLM | PreTrainedModel,
         tokenizer: PreTrainedTokenizerBase | AutoTokenizer,
@@ -310,6 +402,9 @@ class Forge:
         logging.info(
             f"Using layers from {min_layer} to {max_layer} for computing best direction."
         )
+
+        logging.info(f"\n============== Refusal scores will be computed for {max_layer-min_layer} different layers ==============")
+
         score_x_layer = []
         logging.info("Tokenizing evaluation instructions...")
         with tqdm(
@@ -335,47 +430,62 @@ class Forge:
             objective_behaviour_tokenized_instructions=obj_beh_toks,
             anti_behaviour_tokenized_instructions=anti_obj_toks,
         )
+        self._check_memory_usage()
 
+        logging.info('Freeing memory from tokenized instructions...')
         self.free_memory([obj_beh_toks, anti_obj_toks])
+        logging.info('Freed Memory')
 
-        logging.info("Finding best objective_behaviour direction...")
+        # print('\nStarting loop over layers. We will find a refusal direction for each layer, ablate the model on that layer and test the refusal score...')
+        # print('\nThe best refusal direction will be the one that minimizes the refusal score on the harmful instructions, i.e. the one that affects the model the most.')
+
         for layer_idx in trange(
             min_layer, max_layer, desc="Finding best objective_behaviour direction"
         ):
+            start_time = time.time()
+            logging.info('Computing objective_behaviour direction for layer:', layer_idx)
             tmp_obj_beh_dir = self.compute_objective_behaviour_direction(
                 model=model,
                 objective_behaviour_outputs=d_out["obj_beh"],
                 antiobjective_outputs=d_out["anti_obj"],
                 layer=layer_idx,
             )
-            logging.info(
-                f"Objective_behaviour direction computed for layer {layer_idx}."
-            )
-            logging.info("Ablating and adding layers to compute score...")
-            conversations_ablated = self.run_forged_model(
-                model=model,
-                type_of_layer=AblationDecoderLayer,
-                objective_behaviour_dir=tmp_obj_beh_dir,
-                tokenizer=tokenizer,
-                min_layer=min_layer,
-                max_layer=max_layer,
-                instructions=eval_objective_behaviour_instructions,
-                max_new_tokens=100,
-                stream=False,
-            )
+            self._check_memory_usage()
 
-            logging.info("Ablation complete. Adding layers to compute score...")
-            conversations_added = self.run_forged_model(
-                model=model,
-                type_of_layer=AdditionDecoderLayer,
-                objective_behaviour_dir=tmp_obj_beh_dir,
-                tokenizer=tokenizer,
-                min_layer=layer_idx,
-                max_layer=layer_idx + 1,
-                instructions=eval_antiobjective_instructions,
-                max_new_tokens=100,
-                stream=False,
-            )
+            logging.info('\nRunning inference on objective_behaviour instrunctions on the ablated model ...')
+            conversations_ablated = []
+            conversations_added =[]
+            for batch in range(0, len(eval_objective_behaviour_instructions), self.batch_size):
+                conversations_ablated.extend(
+                    self.run_forged_model(
+                        model=model,
+                        type_of_layer=AblationDecoderLayer,
+                        objective_behaviour_dir=tmp_obj_beh_dir,
+                        tokenizer=tokenizer,
+                        min_layer=min_layer,
+                        max_layer=max_layer,
+                        instructions=eval_objective_behaviour_instructions[batch:min(batch + self.batch_size, len(eval_objective_behaviour_instructions))],
+                        max_new_tokens=100,
+                        stream=False,
+                    )
+                )
+                self._check_memory_usage()
+            logging.info('\nRunning inference on anti_objective_behaviour instrunctions on the added model ...')
+            for batch in range(0, len(eval_antiobjective_instructions), self.batch_size):
+                conversations_added.extend(
+                    self.run_forged_model(
+                        model=model,
+                        type_of_layer=AdditionDecoderLayer,
+                        objective_behaviour_dir=tmp_obj_beh_dir,
+                        tokenizer=tokenizer,
+                        min_layer=layer_idx,
+                        max_layer=layer_idx + 1,
+                        instructions=eval_antiobjective_instructions[batch:min(batch + self.batch_size, len(eval_antiobjective_instructions))],
+                        max_new_tokens=100,
+                        stream=False,
+                    )
+                )
+                # todo: what is better as a refusal score metric?
 
             objective_behaviour_score = sum(
                 [
@@ -396,6 +506,7 @@ class Forge:
                 ]
             )
 
+
             score_x_layer.append(
                 {
                     "layer": layer_idx,
@@ -403,13 +514,22 @@ class Forge:
                     "dir": tmp_obj_beh_dir,
                 }
             )
+            self._check_memory_usage()
+
+            self.free_memory([tmp_obj_beh_dir, conversations_ablated])
+
+            end_time = time.time()
+            print(f'''\nLayer {layer_idx} done in {end_time-start_time:.2f} seconds. Refusal score: {refusal_score:.2f} - {sum(refusal_scores):.0f} harmful prompts refused over {len(refusal_scores)} prompts.''')
+
+            # print('\nFinish computing layer', layer_idx)
+
         score_x_layer = sorted(
             score_x_layer, key=lambda x: x["score"], reverse=True
         )
-        return score_x_layer[0]["dir"]
+        return score_x_layer[0]["dir"]# Return the whole dictionary
 
+    @staticmethod
     def _replace_layers(
-        self,
         new_layer: Type[torch.nn.Module],
         max_layer: int,
         min_layer: int,
@@ -515,7 +635,11 @@ class Forge:
             )
 
         new_model = self._replace_layers(
-            new_layer=type_of_layer if type_of_layer else AblationDecoderLayer,
+            new_layer=(
+                type_of_layer
+                if type_of_layer
+                else AblationDecoderLayer
+            ),
             max_layer=max_layer,
             min_layer=min_layer,
             model=model,
@@ -535,7 +659,9 @@ class Forge:
             ) as bar:
                 instr_tokens: List[torch.Tensor] = [
                     self._tokenize(
-                        tokenizer=tokenizer, instruction=instruction, bar=bar
+                        tokenizer=tokenizer,
+                        instruction=instruction,
+                        bar=bar
                     )
                     for instruction in instructions
                 ]
@@ -553,12 +679,12 @@ class Forge:
                 encoded_responses = [
                     self._generate_new_tokens(
                         model=new_model,
-                        tokens=instr_tok,
+                        tokens=instr_token,
                         bar=bar,
                         n_generated_tokens=max_new_tokens,
                         streamer=TextStreamer(tokenizer) if stream else None,
                     )
-                    for instr_tok in instr_tokens
+                    for instr_token in instr_tokens
                 ]
 
         self.free_memory([new_model])
@@ -571,13 +697,97 @@ class Forge:
                     {
                         "role": "assistant",
                         "content": tokenizer.decode(
-                            enc_resp.sequences[0].tolist(), skip_special_tokens=True
+                            enc_resp.sequences[0].tolist(),
+                            skip_special_tokens=True
                         ),
                     },
                 ]
             )
 
         return conversations
+
+
+    #todo decide if to use like this
+    def evaluate_base_model(
+        self,
+        model: AutoModelForCausalLM | PreTrainedModel,
+        tokenizer: PreTrainedTokenizerBase | AutoTokenizer,
+        instructions: List[str] | None = None,
+        tokenized_instructions: List[Tensor] | None = None,
+        max_new_tokens: int = 100,
+        stream: bool = False,
+    ) -> List[List[Dict[str, Any]]]:
+        """
+        Runs the forged model.
+        :param model: A HuggingFace model.
+        :param tokenizer: Tokenizer for a particular model.
+        :param instructions: Instructions to be used for the forged model.
+        :param tokenized_instructions: Tokenized instructions to be used for the forged model.
+        :param max_new_tokens: Maximum number of tokens to be generated.
+        :param stream: Whether to show as text the generation.
+        :return: List of conversations.
+        """
+
+        if tokenized_instructions:
+            logging.info(
+                "Using provided tokenized instructions. "
+                "No need to tokenize again."
+            )
+            instr_tokens = tokenized_instructions
+        elif instructions:
+            with tqdm(
+                total=len(instructions),
+                desc="Tokenizing instructions...",
+            ) as bar:
+                instr_tokens: List[torch.Tensor] = [
+                    self._tokenize(
+                        tokenizer=tokenizer,
+                        instruction=instruction,
+                        bar=bar
+                    )
+                    for instruction in instructions
+                ]
+        else:
+            raise ValueError(
+                "Either instructions or tokenized instructions "
+                "must be provided."
+            )
+
+        with tqdm(
+            total=len(instructions),
+            desc="Inference on base model..."
+        ) as bar:
+            encoded_responses = [
+                self._generate_new_tokens(
+                    model=model,
+                    tokens=instr_token,
+                    bar=bar,
+                    n_generated_tokens=max_new_tokens,
+                    streamer=TextStreamer(tokenizer) if stream else None,
+                )
+                for instr_token in instr_tokens
+            ]
+
+        conversations: List[List[Dict[str, Any]]] = []
+        for enc_resp, instr in zip(encoded_responses, instructions):
+            conversations.append(
+                [
+                    {"role": "user", "content": instr},
+                    {
+                        "role": "assistant",
+                        "content": tokenizer.decode(
+                            enc_resp.sequences[0].tolist(),
+                            skip_special_tokens=True
+                        ),
+                    },
+                ]
+            )
+
+        self.free_memory([instructions, encoded_responses])
+
+        return conversations
+
+
 
     @staticmethod
     def _modify_tensor(
@@ -644,22 +854,21 @@ class Forge:
                 "No model architecture provided. Trying to identify the model architecture based on the layer names."
             )
             model_architecture = identify_model(model.model)
-        layer_names = get_layers_names_by_model(model_architecture.lower())
+        layer_names = get_layers_names_by_model(
+            model_architecture.lower()
+        )
         custom_model = model.model
 
         if min_layer is None:
             min_layer = max(int(len(model.model.layers) * 0.2), 2)
         if max_layer is None:
             max_layer = min(
-                int(len(model.model.layers) * 0.8), len(model.model.layers) - 3
+                int(len(model.model.layers) * 0.8),
+                len(model.model.layers) - 3
             )
+
         for layer_idx in range(min_layer, max_layer):
             layer = custom_model.layers[layer_idx]
-
-            # If the layer is an AblationDecoderLayer, work with its original_layer.
-            if hasattr(layer, "original_layer"):
-                layer = layer.original_layer
-
             for attr_path in layer_names.values():
                 parts = attr_path.split(".")
                 target = layer
@@ -671,8 +880,11 @@ class Forge:
                     behaviour_dir=behaviour_dir,
                     scale_factor=scale_factor,
                 )
-                setattr(target, parts[-1], torch.nn.Parameter(modified_weight))
-
+                setattr(
+                    target,
+                    parts[-1],
+                    torch.nn.Parameter(modified_weight)
+                )
         if output_model_name:
             model.save_pretrained(
                 output_model_name,
