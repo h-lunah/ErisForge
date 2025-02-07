@@ -519,9 +519,7 @@ class Forge:
             self.free_memory([tmp_obj_beh_dir, conversations_ablated])
 
             end_time = time.time()
-            print(f'''\nLayer {layer_idx} done in {end_time-start_time:.2f} seconds. Refusal score: {refusal_score:.2f} - {sum(refusal_scores):.0f} harmful prompts refused over {len(refusal_scores)} prompts.''')
-
-            # print('\nFinish computing layer', layer_idx)
+            logging.info(f'''\nLayer {layer_idx} done in {end_time-start_time:.2f} seconds. Objective_behaviour score: {objective_behaviour_score:.2f}, Antiobjective score: {antiobjective_score:.2f}''')
 
         score_x_layer = sorted(
             score_x_layer, key=lambda x: x["score"], reverse=True
