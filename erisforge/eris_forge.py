@@ -14,7 +14,7 @@ import torch
 from torch import (
     Tensor,
 )
-from tqdm import (
+from tqdm.auto import (
     tqdm,
     trange,
 )
@@ -335,8 +335,14 @@ class Forge:
             print(f"{prefix}Neither CUDA nor macOS detected. Cannot determine memory usage.")
 
 
-    def _check_memory_usage(threshold=0.8):
-        """Checks memory usage (GPU or CPU) and prints a warning if above threshold."""
+    def _check_memory_usage(
+            threshold:int=0.8,
+    ) -> None:
+        """
+        Checks the memory usage and prints a warning if it is above the threshold.
+        :param threshold: The threshold for the memory usage.
+        :return: None
+        """
 
         if torch.cuda.is_available():
             allocated = torch.cuda.memory_allocated()
@@ -355,16 +361,13 @@ class Forge:
                 mem_info = process.memory_info()
                 used_memory = mem_info.rss / (1024 ** 3)  # Resident Set Size
                 available_memory = psutil.virtual_memory().available / (1024 ** 3)
-
-                # print(f"\n=========================== USED GPU MEMORY: {(used_memory/(used_memory+available_memory)*100):.0f}% ===========================\n")
-
                 if float(used_memory/(used_memory+available_memory)) > float(0.8):
                     logging.warning(f"System memory usage above {0.8*100:.0f}%: {(used_memory/(used_memory+available_memory)*100):.0f}% used.")
 
             except ImportError:
-                logging.warning("psutil not found. Cannot check system memory usage. Install with: pip install psutil")
+                logging.error("psutil not found. Cannot check system memory usage. Install with: pip install psutil")
             except Exception as e:
-                logging.warning(f"Error getting system memory info: {e}")
+                logging.error(f"Error getting system memory info: {e}")
 
         else:
             logging.warning("Neither CUDA nor macOS detected. Cannot determine memory usage.")
@@ -455,7 +458,12 @@ class Forge:
             logging.info('\nRunning inference on objective_behaviour instrunctions on the ablated model ...')
             conversations_ablated = []
             conversations_added =[]
-            for batch in range(0, len(eval_objective_behaviour_instructions), self.batch_size):
+            for batch in trange(
+                    start=0,
+                    stop=len(eval_objective_behaviour_instructions),
+                    step=self.batch_size,
+                    desc="Running inference on objective_behaviour instrunctions on the ablated model",
+            ):
                 conversations_ablated.extend(
                     self.run_forged_model(
                         model=model,
