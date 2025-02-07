@@ -458,12 +458,7 @@ class Forge:
             logging.info('\nRunning inference on objective_behaviour instrunctions on the ablated model ...')
             conversations_ablated = []
             conversations_added =[]
-            for batch in trange(
-                    start=0,
-                    stop=len(eval_objective_behaviour_instructions),
-                    step=self.batch_size,
-                    desc="Running inference on objective_behaviour instrunctions on the ablated model",
-            ):
+            for batch in trange(0,len(eval_objective_behaviour_instructions),self.batch_size,desc="Running inference on objective_behaviour instrunctions on the ablated model"):
                 conversations_ablated.extend(
                     self.run_forged_model(
                         model=model,
