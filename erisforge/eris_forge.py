@@ -113,7 +113,7 @@ class Forge:
                 " assistant. Results may be unexpected or useless."
                 " Falling back to default template.",
             )
-            tokens: torch.Tensor = tokenizer.encode(
+            tokens: torch.Tensor = tokenizer(
                 f"User query: {instruction}\nAI Assistant: ",
                 return_tensors="pt",
             )
