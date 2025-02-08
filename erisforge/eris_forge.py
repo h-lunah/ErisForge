@@ -63,9 +63,9 @@ class Forge:
             self.device = torch.device("cpu")
 
     def load_instructions(
-        self,
-        objective_behaviour_instructions: List[str],
-        anti_behaviour_instructions: List[str],
+            self,
+            objective_behaviour_instructions: List[str],
+            anti_behaviour_instructions: List[str],
     ) -> None:
         """
         Loads the instructions for the Forge object.
@@ -89,9 +89,9 @@ class Forge:
 
     @staticmethod
     def _tokenize(
-        tokenizer: PreTrainedTokenizerBase,
-        instruction: str,
-        bar: tqdm | None = None,
+            tokenizer: PreTrainedTokenizerBase,
+            instruction: str,
+            bar: tqdm | None = None,
     ) -> torch.Tensor:
         """
         Tokenizes the instruction.
@@ -123,16 +123,18 @@ class Forge:
         return tokens
 
     def tokenize_instructions(
-        self,
-        tokenizer: PreTrainedTokenizerBase | AutoTokenizer | str,
-        max_n_objective_behaviour_instruction: int | None = None,
-        max_n_antiobjective_instruction: int | None = None,
+            self,
+            tokenizer: PreTrainedTokenizerBase | AutoTokenizer | str,
+            max_n_objective_behaviour_instruction: int | None = None,
+            max_n_antiobjective_instruction: int | None = None,
+            disable_tqdm: bool = False,
     ) -> Dict[str, List[Tensor]]:
         """
         Tokenizes the instructions.
         :param tokenizer: Tokenizer for a particular model.
         :param max_n_objective_behaviour_instruction: Maximum number of objective_behaviour instructions to be tokenized.
         :param max_n_antiobjective_instruction: Maximum number of antiobjective instructions to be tokenized.
+        :param disable_tqdm: Whether to disable the tqdm progress bar.
         :return: Dictionary containing tokenized objective_behaviour and antiobjective instructions.
         """
         if isinstance(tokenizer, str):
@@ -169,8 +171,9 @@ class Forge:
 
         logging.info("Tokenizing objective_behaviour instructions...")
         with tqdm(
-            total=max_n_objective_behaviour_instruction,
-            desc="Tokenizing objective_behaviour instructions",
+                total=max_n_objective_behaviour_instruction,
+                desc="Tokenizing objective_behaviour instructions",
+                disable=disable_tqdm,
         ) as bar:
             objective_behaviour_instr_tokens: List[torch.Tensor] = [
                 self._tokenize(
@@ -183,8 +186,9 @@ class Forge:
 
         logging.info("Tokenizing antiobjective instructions...")
         with tqdm(
-            total=max_n_antiobjective_instruction,
-            desc="Tokenizing antiobjective instructions",
+                total=max_n_antiobjective_instruction,
+                desc="Tokenizing antiobjective instructions",
+                disable=disable_tqdm,
         ) as bar:
             antiobjective_instr_tokens: List[torch.Tensor] = [
                 self._tokenize(
@@ -200,12 +204,12 @@ class Forge:
         }
 
     def _generate_new_tokens(
-        self,
-        model: AutoModelForCausalLM,
-        tokens: Tensor,
-        bar: tqdm | None = None,
-        n_generated_tokens: int = 1,
-        streamer: TextStreamer | None = None,
+            self,
+            model: AutoModelForCausalLM,
+            tokens: Tensor,
+            bar: tqdm | None = None,
+            n_generated_tokens: int = 1,
+            streamer: TextStreamer | None = None,
     ) -> GenerateDecoderOnlyOutput:
         """
         Generates new tokens given a prompt.
@@ -235,16 +239,18 @@ class Forge:
         return output
 
     def compute_output(
-        self,
-        model: AutoModelForCausalLM | str,
-        objective_behaviour_tokenized_instructions: List[Tensor],
-        anti_behaviour_tokenized_instructions: List[Tensor],
+            self,
+            model: AutoModelForCausalLM | str,
+            objective_behaviour_tokenized_instructions: List[Tensor],
+            anti_behaviour_tokenized_instructions: List[Tensor],
+            disable_tqdm: bool = False,
     ) -> Dict[str, List[GenerateDecoderOnlyOutput]]:
         """
         Computes the output for the given instructions.
         :param model: A HuggingFace model.
         :param objective_behaviour_tokenized_instructions: Tokenized objective_behaviour instructions.
         :param anti_behaviour_tokenized_instructions: Tokenized antiobjective instructions.
+        :param disable_tqdm: Whether to disable the tqdm progress bar.
         :return: Dictionary containing the outputs for the given instructions.
         """
         if isinstance(model, str):
@@ -260,8 +266,9 @@ class Forge:
 
         logging.info("Generating tokens on objective_behaviour instructions.")
         with tqdm(
-            total=len(objective_behaviour_tokenized_instructions),
-            desc="Generating tokens on objective_behaviour instructions",
+                total=len(objective_behaviour_tokenized_instructions),
+                desc="Generating tokens on objective_behaviour instructions",
+                disable=disable_tqdm,
         ) as bar:
             objective_behaviour_outputs = [
                 self._generate_new_tokens(
@@ -276,8 +283,9 @@ class Forge:
 
         logging.info("Generating tokens on antiobjective instructions.")
         with tqdm(
-            total=len(anti_behaviour_tokenized_instructions),
-            desc="Generating tokens on antiobjective instructions",
+                total=len(anti_behaviour_tokenized_instructions),
+                desc="Generating tokens on antiobjective instructions",
+                disable=disable_tqdm,
         ) as bar:
             antiobjective_outputs = [
                 self._generate_new_tokens(
@@ -295,8 +303,7 @@ class Forge:
             "anti_obj": antiobjective_outputs,
         }
 
-
-    def _print_memory_usage(prefix: str="") -> None:
+    def _print_memory_usage(prefix: str = "") -> None:
         """
         Prints memory usage to better track what is going on under the hood.
         :param prefix: The prefix for the GPU.
@@ -308,10 +315,10 @@ class Forge:
             cached = torch.cuda.memory_reserved()
             free = torch.cuda.mem_get_info(0)[0]
 
-            print(f"{prefix}GPU Allocated: {allocated / 1024**3:.2f} GB")
-            print(f"{prefix}GPU Cached: {cached / 1024**3:.2f} GB")
-            print(f"{prefix}GPU Free: {free / 1024**3:.2f} GB")
-            print(f"{prefix}GPU Total: {(allocated + free) / 1024**3:.2f} GB")
+            print(f"{prefix}GPU Allocated: {allocated / 1024 ** 3:.2f} GB")
+            print(f"{prefix}GPU Cached: {cached / 1024 ** 3:.2f} GB")
+            print(f"{prefix}GPU Free: {free / 1024 ** 3:.2f} GB")
+            print(f"{prefix}GPU Total: {(allocated + free) / 1024 ** 3:.2f} GB")
 
         elif platform.system() == "Darwin":  # Check for macOS (Apple Silicon or Intel)
             try:
@@ -334,9 +341,8 @@ class Forge:
         else:
             print(f"{prefix}Neither CUDA nor macOS detected. Cannot determine memory usage.")
 
-
     def _check_memory_usage(
-            threshold:int=0.8,
+            threshold: int = 0.8,
     ) -> None:
         """
         Checks the memory usage and prints a warning if it is above the threshold.
@@ -347,10 +353,10 @@ class Forge:
         if torch.cuda.is_available():
             allocated = torch.cuda.memory_allocated()
             total = torch.cuda.mem_get_info(0)[1]  # Total GPU memory
-            used_percentage = (allocated / total) if total > 0 else 0 # avoid division by zero
+            used_percentage = (allocated / total) if total > 0 else 0  # avoid division by zero
 
             if used_percentage > 0.8:
-                logging.warning(f"GPU memory usage above {0.8*100:.0f}%: {used_percentage*100:.0f}% used.")
+                logging.warning(f"GPU memory usage above {0.8 * 100:.0f}%: {used_percentage * 100:.0f}% used.")
 
 
         elif platform.system() == "Darwin":  # macOS
@@ -361,8 +367,9 @@ class Forge:
                 mem_info = process.memory_info()
                 used_memory = mem_info.rss / (1024 ** 3)  # Resident Set Size
                 available_memory = psutil.virtual_memory().available / (1024 ** 3)
-                if float(used_memory/(used_memory+available_memory)) > float(0.8):
-                    logging.warning(f"System memory usage above {0.8*100:.0f}%: {(used_memory/(used_memory+available_memory)*100):.0f}% used.")
+                if float(used_memory / (used_memory + available_memory)) > float(0.8):
+                    logging.warning(
+                        f"System memory usage above {0.8 * 100:.0f}%: {(used_memory / (used_memory + available_memory) * 100):.0f}% used.")
 
             except ImportError:
                 logging.error("psutil not found. Cannot check system memory usage. Install with: pip install psutil")
@@ -372,17 +379,16 @@ class Forge:
         else:
             logging.warning("Neither CUDA nor macOS detected. Cannot determine memory usage.")
 
-
-
     def approx_best_objective_behaviour_dir(
-        self,
-        model: AutoModelForCausalLM | PreTrainedModel,
-        tokenizer: PreTrainedTokenizerBase | AutoTokenizer,
-        scorer: BaseScorer,
-        eval_objective_behaviour_instructions: List[str],
-        eval_antiobjective_instructions: List[str],
-        min_layer: int | None = None,
-        max_layer: int | None = None,
+            self,
+            model: AutoModelForCausalLM | PreTrainedModel,
+            tokenizer: PreTrainedTokenizerBase | AutoTokenizer,
+            scorer: BaseScorer,
+            eval_objective_behaviour_instructions: List[str],
+            eval_antiobjective_instructions: List[str],
+            min_layer: int | None = None,
+            max_layer: int | None = None,
+            disable_tqdm: bool = False,
     ) -> Tensor:
         """
         Finds the approximate best objective_behaviour direction, given the model, tokenizer, scorer, instructions and the layers.
@@ -393,6 +399,7 @@ class Forge:
         :param eval_antiobjective_instructions: Instructions for evaluating the antiobjective.
         :param min_layer: First layer to be considered for computing the best direction.
         :param max_layer: Last layer to be considered for computing the best direction.
+        :param disable_tqdm: Whether to disable the tqdm progress bar.
         :return: The approximate best objective_behaviour direction.
         """
         if min_layer is None:
@@ -406,21 +413,24 @@ class Forge:
             f"Using layers from {min_layer} to {max_layer} for computing best direction."
         )
 
-        logging.info(f"\n============== Refusal scores will be computed for {max_layer-min_layer} different layers ==============")
+        logging.info(
+            f"\n============== Refusal scores will be computed for {max_layer - min_layer} different layers ==============")
 
         score_x_layer = []
         logging.info("Tokenizing evaluation instructions...")
         with tqdm(
-            total=len(eval_objective_behaviour_instructions),
-            desc="Tokenizing objective_behaviour Eval Instructions set",
+                total=len(eval_objective_behaviour_instructions),
+                desc="Tokenizing objective_behaviour Eval Instructions set",
+                disable=disable_tqdm,
         ) as bar:
             obj_beh_toks = [
                 self._tokenize(tokenizer=tokenizer, instruction=instr, bar=bar)
                 for instr in eval_objective_behaviour_instructions
             ]
         with tqdm(
-            total=len(eval_antiobjective_instructions),
-            desc="Tokenizing antiobjective Eval Instructions set",
+                total=len(eval_antiobjective_instructions),
+                desc="Tokenizing antiobjective Eval Instructions set",
+                disable=disable_tqdm,
         ) as bar:
             anti_obj_toks = [
                 self._tokenize(tokenizer=tokenizer, instruction=instr, bar=bar)
@@ -443,7 +453,7 @@ class Forge:
         # print('\nThe best refusal direction will be the one that minimizes the refusal score on the harmful instructions, i.e. the one that affects the model the most.')
 
         for layer_idx in trange(
-            min_layer, max_layer, desc="Finding best objective_behaviour direction"
+                min_layer, max_layer, desc="Finding best objective_behaviour direction",disable=disable_tqdm
         ):
             start_time = time.time()
             logging.info('Computing objective_behaviour direction for layer:', layer_idx)
@@ -457,8 +467,9 @@ class Forge:
 
             logging.info('\nRunning inference on objective_behaviour instrunctions on the ablated model ...')
             conversations_ablated = []
-            conversations_added =[]
-            for batch in trange(0,len(eval_objective_behaviour_instructions),self.batch_size,desc="Running inference on objective_behaviour instrunctions on the ablated model"):
+            conversations_added = []
+            for batch in trange(0, len(eval_objective_behaviour_instructions), self.batch_size,
+                                desc="Running inference on objective_behaviour instrunctions on the ablated model",disable=disable_tqdm):
                 conversations_ablated.extend(
                     self.run_forged_model(
                         model=model,
@@ -467,14 +478,15 @@ class Forge:
                         tokenizer=tokenizer,
                         min_layer=min_layer,
                         max_layer=max_layer,
-                        instructions=eval_objective_behaviour_instructions[batch:min(batch + self.batch_size, len(eval_objective_behaviour_instructions))],
+                        instructions=eval_objective_behaviour_instructions[
+                                     batch:min(batch + self.batch_size, len(eval_objective_behaviour_instructions))],
                         max_new_tokens=100,
                         stream=False,
                     )
                 )
                 self._check_memory_usage()
             logging.info('\nRunning inference on anti_objective_behaviour instrunctions on the added model ...')
-            for batch in range(0, len(eval_antiobjective_instructions), self.batch_size):
+            for batch in trange(0, len(eval_antiobjective_instructions), self.batch_size, disable=disable_tqdm,):
                 conversations_added.extend(
                     self.run_forged_model(
                         model=model,
@@ -483,7 +495,8 @@ class Forge:
                         tokenizer=tokenizer,
                         min_layer=layer_idx,
                         max_layer=layer_idx + 1,
-                        instructions=eval_antiobjective_instructions[batch:min(batch + self.batch_size, len(eval_antiobjective_instructions))],
+                        instructions=eval_antiobjective_instructions[
+                                     batch:min(batch + self.batch_size, len(eval_antiobjective_instructions))],
                         max_new_tokens=100,
                         stream=False,
                     )
@@ -509,7 +522,6 @@ class Forge:
                 ]
             )
 
-
             score_x_layer.append(
                 {
                     "layer": layer_idx,
@@ -522,20 +534,22 @@ class Forge:
             self.free_memory([tmp_obj_beh_dir, conversations_ablated])
 
             end_time = time.time()
-            logging.info(f'''\nLayer {layer_idx} done in {end_time-start_time:.2f} seconds. Objective_behaviour score: {objective_behaviour_score:.2f}, Antiobjective score: {antiobjective_score:.2f}''')
+            logging.info(
+                f'''\nLayer {layer_idx} done in {end_time - start_time:.2f} seconds. Objective_behaviour score: {objective_behaviour_score:.2f}, Antiobjective score: {antiobjective_score:.2f}''')
 
         score_x_layer = sorted(
             score_x_layer, key=lambda x: x["score"], reverse=True
         )
-        return score_x_layer[0]["dir"]# Return the whole dictionary
+        return score_x_layer[0]["dir"]  # Return the whole dictionary
 
     @staticmethod
     def _replace_layers(
-        new_layer: Type[torch.nn.Module],
-        max_layer: int,
-        min_layer: int,
-        model: AutoModelForCausalLM | PreTrainedModel,
-        direction: Tensor,
+            new_layer: Type[torch.nn.Module],
+            max_layer: int,
+            min_layer: int,
+            model: AutoModelForCausalLM | PreTrainedModel,
+            direction: Tensor,
+            disable_tqdm: bool = False,
     ) -> AutoModelForCausalLM | PreTrainedModel:
         """
         Replaces the layers of the model.
@@ -544,11 +558,12 @@ class Forge:
         :param min_layer: Minimum layer to be replaced.
         :param model: A HuggingFace model.
         :param direction: Direction tensor.
+        :param disable_tqdm: Whether to disable the tqdm progress bar.
         :return: Model with replaced layers.
         """
-        for layer_idx in trange(min_layer, max_layer, desc="Ablating model layers"):
+        for layer_idx in trange(min_layer, max_layer, desc="Ablating model layers", disable=disable_tqdm):
             if isinstance(
-                model.model.layers[layer_idx], AblationDecoderLayer
+                    model.model.layers[layer_idx], AblationDecoderLayer
             ) or isinstance(model.model.layers[layer_idx], AdditionDecoderLayer):
                 model.model.layers[layer_idx] = new_layer(
                     original_layer=model.model.layers[layer_idx].original_layer,
@@ -562,11 +577,11 @@ class Forge:
         return model
 
     def compute_objective_behaviour_direction(
-        self,
-        model: AutoModelForCausalLM | PreTrainedModel,
-        objective_behaviour_outputs: List[GenerateDecoderOnlyOutput],
-        antiobjective_outputs: List[GenerateDecoderOnlyOutput],
-        layer: int | None = None,
+            self,
+            model: AutoModelForCausalLM | PreTrainedModel,
+            objective_behaviour_outputs: List[GenerateDecoderOnlyOutput],
+            antiobjective_outputs: List[GenerateDecoderOnlyOutput],
+            layer: int | None = None,
     ) -> Tensor:
         """
         Computes the objective_behaviour direction given a layer.
@@ -582,36 +597,37 @@ class Forge:
         with torch.inference_mode():
             objective_behaviour_mean = torch.stack(
                 [
-                    output.hidden_states[0][layer][:, -self.max_toks :, :].mean(dim=1)
+                    output.hidden_states[0][layer][:, -self.max_toks:, :].mean(dim=1)
                     for output in objective_behaviour_outputs
                 ]
             ).mean(dim=0)
             antiobjective_mean = torch.stack(
                 [
-                    output.hidden_states[0][layer][:, -self.max_toks :, :].mean(dim=1)
+                    output.hidden_states[0][layer][:, -self.max_toks:, :].mean(dim=1)
                     for output in antiobjective_outputs
                 ]
             ).mean(dim=0)
 
         objective_behaviour_dir = objective_behaviour_mean - antiobjective_mean
         objective_behaviour_dir = (
-            objective_behaviour_dir / objective_behaviour_dir.norm()
+                objective_behaviour_dir / objective_behaviour_dir.norm()
         )
 
         return objective_behaviour_dir
 
     def run_forged_model(
-        self,
-        model: AutoModelForCausalLM | PreTrainedModel,
-        objective_behaviour_dir: Tensor,
-        tokenizer: PreTrainedTokenizerBase | AutoTokenizer,
-        type_of_layer: Type[torch.nn.Module] | None = None,
-        min_layer: int | None = None,
-        max_layer: int | None = None,
-        instructions: List[str] | None = None,
-        tokenized_instructions: List[Tensor] | None = None,
-        max_new_tokens: int = 100,
-        stream: bool = False,
+            self,
+            model: AutoModelForCausalLM | PreTrainedModel,
+            objective_behaviour_dir: Tensor,
+            tokenizer: PreTrainedTokenizerBase | AutoTokenizer,
+            type_of_layer: Type[torch.nn.Module] | None = None,
+            min_layer: int | None = None,
+            max_layer: int | None = None,
+            instructions: List[str] | None = None,
+            tokenized_instructions: List[Tensor] | None = None,
+            max_new_tokens: int = 100,
+            stream: bool = False,
+            disable_tqdm: bool = False,
     ) -> List[List[Dict[str, Any]]]:
         """
         Runs the forged model.
@@ -625,6 +641,7 @@ class Forge:
         :param tokenized_instructions: Tokenized instructions to be used for the forged model.
         :param max_new_tokens: Maximum number of tokens to be generated.
         :param stream: Whether to show as text the generation.
+        :param disable_tqdm: Whether to disable the tqdm progress bar.
         :return: List of conversations.
         """
 
@@ -645,6 +662,7 @@ class Forge:
             min_layer=min_layer,
             model=model,
             direction=objective_behaviour_dir,
+            disable_tqdm=disable_tqdm,
         )
 
         if tokenized_instructions:
@@ -655,8 +673,9 @@ class Forge:
         elif instructions:
             logging.info("Tokenizing instructions for newly forged model.")
             with tqdm(
-                total=len(instructions),
-                desc="Tokenizing instructions for newly forged model",
+                    total=len(instructions),
+                    desc="Tokenizing instructions for newly forged model",
+                    disable=disable_tqdm
             ) as bar:
                 instr_tokens: List[torch.Tensor] = [
                     self._tokenize(
@@ -673,8 +692,9 @@ class Forge:
 
         logging.info("Generating tokens for newly forged model.")
         with tqdm(
-            total=len(instructions),
-            desc="Generating tokens for newly forged model",
+                total=len(instructions),
+                desc="Generating tokens for newly forged model",
+                disable=disable_tqdm,
         ) as bar:
             with torch.inference_mode():
                 encoded_responses = [
@@ -707,16 +727,16 @@ class Forge:
 
         return conversations
 
-
-    #todo decide if to use like this
+    # todo decide if to use like this
     def evaluate_base_model(
-        self,
-        model: AutoModelForCausalLM | PreTrainedModel,
-        tokenizer: PreTrainedTokenizerBase | AutoTokenizer,
-        instructions: List[str] | None = None,
-        tokenized_instructions: List[Tensor] | None = None,
-        max_new_tokens: int = 100,
-        stream: bool = False,
+            self,
+            model: AutoModelForCausalLM | PreTrainedModel,
+            tokenizer: PreTrainedTokenizerBase | AutoTokenizer,
+            instructions: List[str] | None = None,
+            tokenized_instructions: List[Tensor] | None = None,
+            max_new_tokens: int = 100,
+            stream: bool = False,
+            disable_tqdm: bool = False,
     ) -> List[List[Dict[str, Any]]]:
         """
         Runs the forged model.
@@ -726,6 +746,7 @@ class Forge:
         :param tokenized_instructions: Tokenized instructions to be used for the forged model.
         :param max_new_tokens: Maximum number of tokens to be generated.
         :param stream: Whether to show as text the generation.
+        :param disable_tqdm: Whether to disable the tqdm progress bar.
         :return: List of conversations.
         """
 
@@ -737,8 +758,9 @@ class Forge:
             instr_tokens = tokenized_instructions
         elif instructions:
             with tqdm(
-                total=len(instructions),
-                desc="Tokenizing instructions...",
+                    total=len(instructions),
+                    desc="Tokenizing instructions...",
+                    disable=disable_tqdm,
             ) as bar:
                 instr_tokens: List[torch.Tensor] = [
                     self._tokenize(
@@ -755,8 +777,9 @@ class Forge:
             )
 
         with tqdm(
-            total=len(instructions),
-            desc="Inference on base model..."
+                total=len(instructions),
+                desc="Inference on base model...",
+                disable=disable_tqdm,
         ) as bar:
             encoded_responses = [
                 self._generate_new_tokens(
@@ -788,13 +811,11 @@ class Forge:
 
         return conversations
 
-
-
     @staticmethod
     def _modify_tensor(
-        tensor: Tensor,
-        behaviour_dir: Tensor,
-        scale_factor: float = 1.0,
+            tensor: Tensor,
+            behaviour_dir: Tensor,
+            scale_factor: float = 1.0,
     ) -> Tensor:
         """
         Modifies the tensor applying the behaviour direction.
@@ -824,16 +845,17 @@ class Forge:
         return torch.nn.Parameter(tensor_modified)
 
     def save_model(
-        self,
-        model: AutoModelForCausalLM | PreTrainedModel,
-        behaviour_dir: Tensor,
-        scale_factor: float = 1.0,
-        min_layer: int | None = None,
-        max_layer: int | None = None,
-        output_model_name: str = None,
-        tokenizer: PreTrainedTokenizerBase | AutoTokenizer = None,
-        to_hub: bool = False,
-        model_architecture: str = "gemma",
+            self,
+            model: AutoModelForCausalLM | PreTrainedModel,
+            behaviour_dir: Tensor,
+            scale_factor: float = 1.0,
+            min_layer: int | None = None,
+            max_layer: int | None = None,
+            output_model_name: str = None,
+            tokenizer: PreTrainedTokenizerBase | AutoTokenizer = None,
+            to_hub: bool = False,
+            model_architecture: str = "gemma",
+            disable_tqdm: bool = False,
     ) -> AutoModelForCausalLM | PreTrainedModel:
         """
         Modifies the layers and saves the model (to disk or to the HuggingFace Hub).
@@ -846,6 +868,7 @@ class Forge:
         :param tokenizer: Tokenizer for a particular model, useful if pushed to hub or saved somewhere.
         :param to_hub: Whether to push the model to the HuggingFace Hub.
         :param model_architecture: Model architecture, needed to identify what are the layers to be modified. If not specified, will try to find the layers to be modified by trying all possibilities.
+        :param disable_tqdm: Whether to disable the tqdm progress bar.
         :return: Modified model.
         """
         if abs(scale_factor) > 1.0:
@@ -868,7 +891,7 @@ class Forge:
                 len(model.model.layers) - 3
             )
 
-        for layer_idx in range(min_layer, max_layer):
+        for layer_idx in trange(min_layer, max_layer, desc="Modifying model layers", disable=disable_tqdm):
             layer = custom_model.layers[layer_idx]
             for attr_path in layer_names.values():
                 parts = attr_path.split(".")
