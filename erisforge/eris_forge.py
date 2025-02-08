@@ -105,6 +105,7 @@ class Forge:
                 conversation=[{"role": "user", "content": instruction}],
                 add_generation_prompt=True,
                 return_tensors="pt",
+                return_dict=True,
             )
         except ValueError:
             logging.error(
@@ -224,12 +225,13 @@ class Forge:
             bar.update(n=1)
 
         params = {
-            "inputs": tokens.to(self.device),
             "use_cache": False,
             "max_new_tokens": n_generated_tokens,
             "return_dict_in_generate": True,
             "output_hidden_states": True,
         }
+
+        params =params | tokens.to(self.device)
 
         if streamer:
             params["streamer"] = streamer
