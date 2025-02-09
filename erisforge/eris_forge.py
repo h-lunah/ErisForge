@@ -391,6 +391,7 @@ class Forge:
             min_layer: int | None = None,
             max_layer: int | None = None,
             disable_tqdm: bool = False,
+            batch_size: int | None = None,
     ) -> Tensor:
         """
         Finds the approximate best objective_behaviour direction, given the model, tokenizer, scorer, instructions and the layers.
@@ -402,14 +403,17 @@ class Forge:
         :param min_layer: First layer to be considered for computing the best direction.
         :param max_layer: Last layer to be considered for computing the best direction.
         :param disable_tqdm: Whether to disable the tqdm progress bar.
+        :param batch_size: Batch size for the model.
         :return: The approximate best objective_behaviour direction.
         """
         if min_layer is None:
             min_layer = max(int(len(model.model.layers) * 0.2), 1)
         if max_layer is None:
             max_layer = min(
-                int(len(model.model.layers) * 0.8), len(model.model.layers) - 2
+                int(len(model.model.layers) * 0.9), len(model.model.layers) - 2
             )
+
+        batch_size = batch_size if batch_size else self.batch_size
 
         logging.info(
             f"Using layers from {min_layer} to {max_layer} for computing best direction."
@@ -470,7 +474,7 @@ class Forge:
             logging.info('\nRunning inference on objective_behaviour instrunctions on the ablated model ...')
             conversations_ablated = []
             conversations_added = []
-            for batch in trange(0, len(eval_objective_behaviour_instructions), self.batch_size,
+            for batch in trange(0, len(eval_objective_behaviour_instructions), batch_size,
                                 desc="Running inference on objective_behaviour instrunctions on the ablated model",disable=disable_tqdm):
                 conversations_ablated.extend(
                     self.run_forged_model(
@@ -481,14 +485,15 @@ class Forge:
                         min_layer=min_layer,
                         max_layer=max_layer,
                         instructions=eval_objective_behaviour_instructions[
-                                     batch:min(batch + self.batch_size, len(eval_objective_behaviour_instructions))],
+                                     batch:min(batch + batch_size, len(eval_objective_behaviour_instructions))],
                         max_new_tokens=100,
                         stream=False,
+                        disable_tqdm=True,
                     )
                 )
                 self._check_memory_usage()
             logging.info('\nRunning inference on anti_objective_behaviour instrunctions on the added model ...')
-            for batch in trange(0, len(eval_antiobjective_instructions), self.batch_size, disable=disable_tqdm,):
+            for batch in trange(0, len(eval_antiobjective_instructions), batch_size, disable=disable_tqdm,):
                 conversations_added.extend(
                     self.run_forged_model(
                         model=model,
@@ -498,9 +503,10 @@ class Forge:
                         min_layer=layer_idx,
                         max_layer=layer_idx + 1,
                         instructions=eval_antiobjective_instructions[
-                                     batch:min(batch + self.batch_size, len(eval_antiobjective_instructions))],
+                                     batch:min(batch + batch_size, len(eval_antiobjective_instructions))],
                         max_new_tokens=100,
                         stream=False,
+                        disable_tqdm=True,
                     )
                 )
                 # todo: what is better as a refusal score metric?
