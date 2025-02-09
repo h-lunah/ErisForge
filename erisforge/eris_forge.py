@@ -1,8 +1,8 @@
-import time
-import platform
 import gc
 import logging
+import platform
 import random
+import time
 from typing import (
     Any,
     Dict,
@@ -76,13 +76,9 @@ class Forge:
         logging.info(
             f"Loading instructions, objective_behaviour: {len(objective_behaviour_instructions)}, antiobjective: {len(anti_behaviour_instructions)}"
         )
-        self.objective_behaviour_instructions: List[str] = (
-            objective_behaviour_instructions
-        )
-        self.anti_behaviour_instructions: List[str] = anti_behaviour_instructions
-        self.max_iterations: int = len(objective_behaviour_instructions) + len(
-            anti_behaviour_instructions
-        )
+        self.objective_behaviour_instructions = objective_behaviour_instructions
+        self.anti_behaviour_instructions = anti_behaviour_instructions
+        self.max_iterations = len(objective_behaviour_instructions) + len(anti_behaviour_instructions)
         logging.info(
             f"Instructions loaded, objective_behaviour: {len(objective_behaviour_instructions)}, antiobjective: {len(anti_behaviour_instructions)}"
         )
@@ -109,10 +105,8 @@ class Forge:
             )
         except ValueError:
             logging.error(
-                "Warning: your model's tokenizer does not support "
-                "chat templates. It is likely not trained as an AI"
-                " assistant. Results may be unexpected or useless."
-                " Falling back to default template.",
+                "Warning: your model's tokenizer does not support chat templates. "
+                "Falling back to default template."
             )
             tokens: torch.Tensor = tokenizer(
                 f"User query: {instruction}\nAI Assistant: ",
@@ -120,7 +114,6 @@ class Forge:
             )
         if bar:
             bar.update(n=1)
-
         return tokens
 
     def tokenize_instructions(
@@ -143,10 +136,7 @@ class Forge:
             tokenizer = AutoTokenizer.from_pretrained(tokenizer, trust_remote_code=True)
 
         max_n_objective_behaviour_instruction = (
-            min(
-                len(self.objective_behaviour_instructions),
-                max_n_objective_behaviour_instruction,
-            )
+            min(len(self.objective_behaviour_instructions), max_n_objective_behaviour_instruction)
             if max_n_objective_behaviour_instruction
             else len(self.objective_behaviour_instructions)
         )
@@ -171,31 +161,17 @@ class Forge:
         )
 
         logging.info("Tokenizing objective_behaviour instructions...")
-        with tqdm(
-                total=max_n_objective_behaviour_instruction,
-                desc="Tokenizing objective_behaviour instructions",
-                disable=disable_tqdm,
-        ) as bar:
-            objective_behaviour_instr_tokens: List[torch.Tensor] = [
-                self._tokenize(
-                    tokenizer=tokenizer,
-                    instruction=objective_behaviour_instruction,
-                    bar=bar,
-                )
-                for objective_behaviour_instruction in objective_behaviour_instructions
+        with tqdm(total=max_n_objective_behaviour_instruction, desc="Tokenizing objective_behaviour instructions", disable=disable_tqdm) as bar:
+            objective_behaviour_instr_tokens = [
+                self._tokenize(tokenizer=tokenizer, instruction=instr, bar=bar)
+                for instr in objective_behaviour_instructions
             ]
 
         logging.info("Tokenizing antiobjective instructions...")
-        with tqdm(
-                total=max_n_antiobjective_instruction,
-                desc="Tokenizing antiobjective instructions",
-                disable=disable_tqdm,
-        ) as bar:
-            antiobjective_instr_tokens: List[torch.Tensor] = [
-                self._tokenize(
-                    tokenizer=tokenizer, instruction=anti_behaviour_instruction, bar=bar
-                )
-                for anti_behaviour_instruction in anti_behaviour_instructions
+        with tqdm(total=max_n_antiobjective_instruction, desc="Tokenizing antiobjective instructions", disable=disable_tqdm) as bar:
+            antiobjective_instr_tokens = [
+                self._tokenize(tokenizer=tokenizer, instruction=instr, bar=bar)
+                for instr in anti_behaviour_instructions
             ]
         logging.info("Tokenization complete.")
 
@@ -211,6 +187,7 @@ class Forge:
             bar: tqdm | None = None,
             n_generated_tokens: int = 1,
             streamer: TextStreamer | None = None,
+            output_hidden_states: bool = True,
     ) -> GenerateDecoderOnlyOutput:
         """
         Generates new tokens given a prompt.
@@ -219,23 +196,25 @@ class Forge:
         :param bar: Progress bar object.
         :param n_generated_tokens: Number of tokens to generate.
         :param streamer: TextStreamer object, used for showing the text generation.
+        :param output_hidden_states: Whether to output hidden states. Defaults to True.
         :return: Generated tokens.
         """
         if bar:
             bar.update(n=1)
 
+        tokens = tokens.to(self.device)
         params = {
             "use_cache": False,
             "max_new_tokens": n_generated_tokens,
             "return_dict_in_generate": True,
-            "output_hidden_states": True,
+            "output_hidden_states": output_hidden_states,
+            **tokens
         }
-
-        params =params | tokens.to(self.device)
 
         if streamer:
             params["streamer"] = streamer
 
+        model.eval()
         with torch.inference_mode():
             output = model.generate(**params)
         return output
@@ -257,46 +236,40 @@ class Forge:
         """
         if isinstance(model, str):
             logging.info(f"Loading model from {model}")
-            model: AutoModelForCausalLM = AutoModelForCausalLM.from_pretrained(
+            model = AutoModelForCausalLM.from_pretrained(
                 model,
                 trust_remote_code=True,
-                device_map=self.device,
                 torch_dtype=torch.bfloat16,
-            )
+            ).to(self.device)
         else:
             model.to(self.device)
+        model.eval()
 
         logging.info("Generating tokens on objective_behaviour instructions.")
-        with tqdm(
-                total=len(objective_behaviour_tokenized_instructions),
-                desc="Generating tokens on objective_behaviour instructions",
-                disable=disable_tqdm,
-        ) as bar:
+        with tqdm(total=len(objective_behaviour_tokenized_instructions), desc="Generating tokens on objective_behaviour instructions", disable=disable_tqdm) as bar:
             objective_behaviour_outputs = [
                 self._generate_new_tokens(
                     model=model,
-                    tokens=objective_behaviour_tokenized_instruction,
+                    tokens=t,
                     bar=bar,
                     n_generated_tokens=self.max_toks,
+                    output_hidden_states=True,
                 )
-                for objective_behaviour_tokenized_instruction in objective_behaviour_tokenized_instructions
+                for t in objective_behaviour_tokenized_instructions
             ]
         logging.info("Completed generating tokens on objective_behaviour instructions.")
 
         logging.info("Generating tokens on antiobjective instructions.")
-        with tqdm(
-                total=len(anti_behaviour_tokenized_instructions),
-                desc="Generating tokens on antiobjective instructions",
-                disable=disable_tqdm,
-        ) as bar:
+        with tqdm(total=len(anti_behaviour_tokenized_instructions), desc="Generating tokens on antiobjective instructions", disable=disable_tqdm) as bar:
             antiobjective_outputs = [
                 self._generate_new_tokens(
                     model=model,
-                    tokens=anti_behaviour_instruction,
+                    tokens=t,
                     bar=bar,
                     n_generated_tokens=self.max_toks,
+                    output_hidden_states=True,
                 )
-                for anti_behaviour_instruction in anti_behaviour_tokenized_instructions
+                for t in anti_behaviour_tokenized_instructions
             ]
         logging.info("Completed generating tokens on antiobjective instructions.")
 
@@ -305,79 +278,65 @@ class Forge:
             "anti_obj": antiobjective_outputs,
         }
 
+    @staticmethod
     def _print_memory_usage(prefix: str = "") -> None:
         """
         Prints memory usage to better track what is going on under the hood.
         :param prefix: The prefix for the GPU.
-        :return: Nonw
+        :return: None
         """
-
-        if torch.cuda.is_available():  # Check for CUDA (NVIDIA GPU)
+        if torch.cuda.is_available():
             allocated = torch.cuda.memory_allocated()
             cached = torch.cuda.memory_reserved()
             free = torch.cuda.mem_get_info(0)[0]
-
             print(f"{prefix}GPU Allocated: {allocated / 1024 ** 3:.2f} GB")
             print(f"{prefix}GPU Cached: {cached / 1024 ** 3:.2f} GB")
             print(f"{prefix}GPU Free: {free / 1024 ** 3:.2f} GB")
             print(f"{prefix}GPU Total: {(allocated + free) / 1024 ** 3:.2f} GB")
-
-        elif platform.system() == "Darwin":  # Check for macOS (Apple Silicon or Intel)
+        elif platform.system() == "Darwin":
             try:
                 import psutil
-
                 process = psutil.Process()
                 mem_info = process.memory_info()
-                used_memory = mem_info.rss / (1024 ** 3)  # Resident Set Size
+                used_memory = mem_info.rss / (1024 ** 3)
                 available_memory = psutil.virtual_memory().available / (1024 ** 3)
-
                 print(f"{prefix}System Used Memory: {used_memory:.2f} GB")
                 print(f"{prefix}System Available Memory: {available_memory:.2f} GB")
                 print(f"{prefix}System Total Memory: {(used_memory + available_memory):.2f} GB")
-
             except ImportError:
-                print(f"{prefix}psutil not found. Cannot display system memory usage. Install with: pip install psutil")
+                print(f"{prefix}psutil not found. Install with: pip install psutil")
             except Exception as e:
                 print(f"{prefix}Error getting system memory info: {e}")
-
         else:
             print(f"{prefix}Neither CUDA nor macOS detected. Cannot determine memory usage.")
 
-    def _check_memory_usage(
-            threshold: int = 0.8,
-    ) -> None:
+    def _check_memory_usage(self, threshold: float = 0.8) -> None:
         """
         Checks the memory usage and prints a warning if it is above the threshold.
         :param threshold: The threshold for the memory usage.
         :return: None
         """
-
         if torch.cuda.is_available():
             allocated = torch.cuda.memory_allocated()
-            total = torch.cuda.mem_get_info(0)[1]  # Total GPU memory
-            used_percentage = (allocated / total) if total > 0 else 0  # avoid division by zero
-
-            if used_percentage > 0.8:
-                logging.warning(f"GPU memory usage above {0.8 * 100:.0f}%: {used_percentage * 100:.0f}% used.")
-
-
-        elif platform.system() == "Darwin":  # macOS
+            total = torch.cuda.mem_get_info(0)[1]
+            used_percentage = allocated / total if total > 0 else 0
+            if used_percentage > threshold:
+                logging.warning(f"GPU memory usage above {threshold * 100:.0f}%: {used_percentage * 100:.0f}% used.")
+        elif platform.system() == "Darwin":
             try:
                 import psutil
-
                 process = psutil.Process()
                 mem_info = process.memory_info()
-                used_memory = mem_info.rss / (1024 ** 3)  # Resident Set Size
+                used_memory = mem_info.rss / (1024 ** 3)
                 available_memory = psutil.virtual_memory().available / (1024 ** 3)
-                if float(used_memory / (used_memory + available_memory)) > float(0.8):
+                if (used_memory / (used_memory + available_memory)) > threshold:
                     logging.warning(
-                        f"System memory usage above {0.8 * 100:.0f}%: {(used_memory / (used_memory + available_memory) * 100):.0f}% used.")
-
+                        f"System memory usage above {threshold * 100:.0f}%: {(used_memory / (used_memory + available_memory) * 100):.0f}% used."
+                    )
             except ImportError:
-                logging.error("psutil not found. Cannot check system memory usage. Install with: pip install psutil")
+                logging.error("psutil not found. Install with: pip install psutil")
             except Exception as e:
                 logging.error(f"Error getting system memory info: {e}")
-
         else:
             logging.warning("Neither CUDA nor macOS detected. Cannot determine memory usage.")
 
@@ -409,35 +368,24 @@ class Forge:
         if min_layer is None:
             min_layer = max(int(len(model.model.layers) * 0.2), 1)
         if max_layer is None:
-            max_layer = min(
-                int(len(model.model.layers) * 0.9), len(model.model.layers) - 2
-            )
+            max_layer = min(int(len(model.model.layers) * 0.9), len(model.model.layers) - 2)
 
         batch_size = batch_size if batch_size else self.batch_size
 
-        logging.info(
-            f"Using layers from {min_layer} to {max_layer} for computing best direction."
-        )
+        model.to(self.device)
+        model.eval()
 
-        logging.info(
-            f"\n============== Refusal scores will be computed for {max_layer - min_layer} different layers ==============")
+        logging.info(f"Using layers from {min_layer} to {max_layer} for computing best direction.")
+        logging.info(f"\n============== Scores will be computed for {max_layer - min_layer} different layers ==============")
 
         score_x_layer = []
         logging.info("Tokenizing evaluation instructions...")
-        with tqdm(
-                total=len(eval_objective_behaviour_instructions),
-                desc="Tokenizing objective_behaviour Eval Instructions set",
-                disable=disable_tqdm,
-        ) as bar:
+        with tqdm(total=len(eval_objective_behaviour_instructions), desc="Tokenizing objective_behaviour Eval Instructions set", disable=disable_tqdm) as bar:
             obj_beh_toks = [
                 self._tokenize(tokenizer=tokenizer, instruction=instr, bar=bar)
                 for instr in eval_objective_behaviour_instructions
             ]
-        with tqdm(
-                total=len(eval_antiobjective_instructions),
-                desc="Tokenizing antiobjective Eval Instructions set",
-                disable=disable_tqdm,
-        ) as bar:
+        with tqdm(total=len(eval_antiobjective_instructions), desc="Tokenizing antiobjective Eval Instructions set", disable=disable_tqdm) as bar:
             anti_obj_toks = [
                 self._tokenize(tokenizer=tokenizer, instruction=instr, bar=bar)
                 for instr in eval_antiobjective_instructions
@@ -448,34 +396,33 @@ class Forge:
             model=model,
             objective_behaviour_tokenized_instructions=obj_beh_toks,
             anti_behaviour_tokenized_instructions=anti_obj_toks,
+            disable_tqdm=disable_tqdm,
         )
         self._check_memory_usage()
 
-        logging.info('Freeing memory from tokenized instructions...')
+        logging.info("Freeing memory from tokenized instructions...")
         self.free_memory([obj_beh_toks, anti_obj_toks])
-        logging.info('Freed Memory')
+        gc.collect()
+        torch.cuda.empty_cache()
+        logging.info("Freed Memory")
 
-        # print('\nStarting loop over layers. We will find a refusal direction for each layer, ablate the model on that layer and test the refusal score...')
-        # print('\nThe best refusal direction will be the one that minimizes the refusal score on the harmful instructions, i.e. the one that affects the model the most.')
-
-        for layer_idx in trange(
-                min_layer, max_layer, desc="Finding best objective_behaviour direction",disable=disable_tqdm
-        ):
+        for layer_idx in trange(min_layer, max_layer, desc="Finding best direction", disable=disable_tqdm):
             start_time = time.time()
-            logging.info('Computing objective_behaviour direction for layer:', layer_idx)
+            logging.info(f"Computing objective_behaviour direction for layer: {layer_idx}")
             tmp_obj_beh_dir = self.compute_objective_behaviour_direction(
                 model=model,
                 objective_behaviour_outputs=d_out["obj_beh"],
                 antiobjective_outputs=d_out["anti_obj"],
                 layer=layer_idx,
-            )
+            ).cpu()
             self._check_memory_usage()
 
-            logging.info('\nRunning inference on objective_behaviour instrunctions on the ablated model ...')
+            logging.info("Running inference on objective_behaviour instructions (Ablated Model)...")
             conversations_ablated = []
             conversations_added = []
-            for batch in trange(0, len(eval_objective_behaviour_instructions), batch_size,
-                                desc="Running inference on objective_behaviour instrunctions on the ablated model",disable=disable_tqdm):
+
+            for batch_start in trange(0, len(eval_objective_behaviour_instructions), batch_size, desc="Ablation on objective_behaviour", disable=disable_tqdm):
+                batch_instructions = eval_objective_behaviour_instructions[batch_start:batch_start + batch_size]
                 conversations_ablated.extend(
                     self.run_forged_model(
                         model=model,
@@ -484,16 +431,18 @@ class Forge:
                         tokenizer=tokenizer,
                         min_layer=min_layer,
                         max_layer=max_layer,
-                        instructions=eval_objective_behaviour_instructions[
-                                     batch:min(batch + batch_size, len(eval_objective_behaviour_instructions))],
+                        instructions=batch_instructions,
                         max_new_tokens=100,
                         stream=False,
                         disable_tqdm=True,
                     )
                 )
-                self._check_memory_usage()
-            logging.info('\nRunning inference on anti_objective_behaviour instrunctions on the added model ...')
-            for batch in trange(0, len(eval_antiobjective_instructions), batch_size, disable=disable_tqdm,):
+                gc.collect()
+                torch.cuda.empty_cache()
+
+            logging.info("Running inference on anti_objective_behaviour instructions (Added Model)...")
+            for batch_start in trange(0, len(eval_antiobjective_instructions), batch_size, desc="Addition on antiobjective", disable=disable_tqdm):
+                batch_instructions = eval_antiobjective_instructions[batch_start:batch_start + batch_size]
                 conversations_added.extend(
                     self.run_forged_model(
                         model=model,
@@ -502,53 +451,48 @@ class Forge:
                         tokenizer=tokenizer,
                         min_layer=layer_idx,
                         max_layer=layer_idx + 1,
-                        instructions=eval_antiobjective_instructions[
-                                     batch:min(batch + batch_size, len(eval_antiobjective_instructions))],
+                        instructions=batch_instructions,
                         max_new_tokens=100,
                         stream=False,
                         disable_tqdm=True,
                     )
                 )
-                # todo: what is better as a refusal score metric?
+                gc.collect()
+                torch.cuda.empty_cache()
 
-            objective_behaviour_score = sum(
-                [
-                    scorer.score(
-                        model_response=conv[-1]["content"],
-                        user_query=conv[-2]["content"],
-                    )
-                    for conv in conversations_ablated
-                ]
-            )
-            antiobjective_score = 1 - sum(
-                [
-                    scorer.score(
-                        model_response=conv[-1]["content"],
-                        user_query=conv[-2]["content"],
-                    )
-                    for conv in conversations_added
-                ]
-            )
+            objective_behaviour_score = sum([
+                scorer.score(
+                    model_response=conv[-1]["content"],
+                    user_query=conv[-2]["content"]
+                )
+                for conv in conversations_ablated
+            ])
+            antiobjective_score = 1 - sum([
+                scorer.score(
+                    model_response=conv[-1]["content"],
+                    user_query=conv[-2]["content"]
+                )
+                for conv in conversations_added
+            ])
 
-            score_x_layer.append(
-                {
-                    "layer": layer_idx,
-                    "score": (objective_behaviour_score - antiobjective_score) / 2,
-                    "dir": tmp_obj_beh_dir,
-                }
-            )
+            score_x_layer.append({
+                "layer": layer_idx,
+                "score": (objective_behaviour_score - antiobjective_score) / 2,
+                "dir": tmp_obj_beh_dir,
+            })
             self._check_memory_usage()
 
-            self.free_memory([tmp_obj_beh_dir, conversations_ablated])
+            del tmp_obj_beh_dir, conversations_ablated, conversations_added
+            gc.collect()
+            torch.cuda.empty_cache()
 
             end_time = time.time()
             logging.info(
-                f'''\nLayer {layer_idx} done in {end_time - start_time:.2f} seconds. Objective_behaviour score: {objective_behaviour_score:.2f}, Antiobjective score: {antiobjective_score:.2f}''')
+                f"\nLayer {layer_idx} done in {end_time - start_time:.2f} seconds. Objective_behaviour score: {objective_behaviour_score:.2f}, Antiobjective score: {antiobjective_score:.2f}"
+            )
 
-        score_x_layer = sorted(
-            score_x_layer, key=lambda x: x["score"], reverse=True
-        )
-        return score_x_layer[0]["dir"]  # Return the whole dictionary
+        score_x_layer = sorted(score_x_layer, key=lambda x: x["score"], reverse=True)
+        return score_x_layer[0]["dir"]
 
     @staticmethod
     def _replace_layers(
@@ -569,10 +513,8 @@ class Forge:
         :param disable_tqdm: Whether to disable the tqdm progress bar.
         :return: Model with replaced layers.
         """
-        for layer_idx in trange(min_layer, max_layer, desc="Ablating model layers", disable=disable_tqdm):
-            if isinstance(
-                    model.model.layers[layer_idx], AblationDecoderLayer
-            ) or isinstance(model.model.layers[layer_idx], AdditionDecoderLayer):
+        for layer_idx in trange(min_layer, max_layer, desc="Replacing model layers", disable=disable_tqdm):
+            if isinstance(model.model.layers[layer_idx], (AblationDecoderLayer, AdditionDecoderLayer)):
                 model.model.layers[layer_idx] = new_layer(
                     original_layer=model.model.layers[layer_idx].original_layer,
                     direction=direction,
@@ -652,90 +594,62 @@ class Forge:
         :param disable_tqdm: Whether to disable the tqdm progress bar.
         :return: List of conversations.
         """
-
         if min_layer is None:
             min_layer = max(int(len(model.model.layers) * 0.2), 1)
         if max_layer is None:
-            max_layer = min(
-                int(len(model.model.layers) * 0.8), len(model.model.layers) - 2
-            )
+            max_layer = min(int(len(model.model.layers) * 0.8), len(model.model.layers) - 2)
 
         new_model = self._replace_layers(
-            new_layer=(
-                type_of_layer
-                if type_of_layer
-                else AblationDecoderLayer
-            ),
+            new_layer=(type_of_layer if type_of_layer else AblationDecoderLayer),
             max_layer=max_layer,
             min_layer=min_layer,
             model=model,
             direction=objective_behaviour_dir,
             disable_tqdm=disable_tqdm,
         )
+        new_model.eval()
 
         if tokenized_instructions:
-            logging.info(
-                "Using provided tokenized instructions. No need to tokenize again."
-            )
+            logging.info("Using provided tokenized instructions. No need to tokenize again.")
             instr_tokens = tokenized_instructions
         elif instructions:
             logging.info("Tokenizing instructions for newly forged model.")
-            with tqdm(
-                    total=len(instructions),
-                    desc="Tokenizing instructions for newly forged model",
-                    disable=disable_tqdm
-            ) as bar:
-                instr_tokens: List[torch.Tensor] = [
-                    self._tokenize(
-                        tokenizer=tokenizer,
-                        instruction=instruction,
-                        bar=bar
-                    )
-                    for instruction in instructions
+            with tqdm(total=len(instructions), desc="Tokenizing instructions for newly forged model", disable=disable_tqdm) as bar:
+                instr_tokens = [
+                    self._tokenize(tokenizer=tokenizer, instruction=instr, bar=bar)
+                    for instr in instructions
                 ]
         else:
-            raise ValueError(
-                "Either instructions or tokenized instructions must be provided."
-            )
+            raise ValueError("Either instructions or tokenized instructions must be provided.")
 
         logging.info("Generating tokens for newly forged model.")
-        with tqdm(
-                total=len(instructions),
-                desc="Generating tokens for newly forged model",
-                disable=disable_tqdm,
-        ) as bar:
+        with tqdm(total=len(instr_tokens), desc="Generating tokens for newly forged model", disable=disable_tqdm) as bar:
             with torch.inference_mode():
                 encoded_responses = [
                     self._generate_new_tokens(
                         model=new_model,
-                        tokens=instr_token,
+                        tokens=t,
                         bar=bar,
                         n_generated_tokens=max_new_tokens,
                         streamer=TextStreamer(tokenizer) if stream else None,
+                        output_hidden_states=True,
                     )
-                    for instr_token in instr_tokens
+                    for t in instr_tokens
                 ]
 
         self.free_memory([new_model])
+        gc.collect()
+        torch.cuda.empty_cache()
 
-        conversations: List[List[Dict[str, Any]]] = []
-        for enc_resp, instr in zip(encoded_responses, instructions):
-            conversations.append(
-                [
-                    {"role": "user", "content": instr},
-                    {
-                        "role": "assistant",
-                        "content": tokenizer.decode(
-                            enc_resp.sequences[0].tolist(),
-                            skip_special_tokens=True
-                        ),
-                    },
-                ]
-            )
+        conversations = []
+        for enc_resp, instr in zip(encoded_responses, instructions or []):
+            conversations.append([
+                {"role": "user", "content": instr},
+                {"role": "assistant", "content": tokenizer.decode(enc_resp.sequences[0].tolist(), skip_special_tokens=True)},
+            ])
 
         return conversations
 
-    # todo decide if to use like this
     def evaluate_base_model(
             self,
             model: AutoModelForCausalLM | PreTrainedModel,
@@ -757,65 +671,45 @@ class Forge:
         :param disable_tqdm: Whether to disable the tqdm progress bar.
         :return: List of conversations.
         """
+        model.to(self.device)
+        model.eval()
 
         if tokenized_instructions:
-            logging.info(
-                "Using provided tokenized instructions. "
-                "No need to tokenize again."
-            )
+            logging.info("Using provided tokenized instructions. No need to tokenize again.")
             instr_tokens = tokenized_instructions
         elif instructions:
-            with tqdm(
-                    total=len(instructions),
-                    desc="Tokenizing instructions...",
-                    disable=disable_tqdm,
-            ) as bar:
-                instr_tokens: List[torch.Tensor] = [
-                    self._tokenize(
-                        tokenizer=tokenizer,
-                        instruction=instruction,
-                        bar=bar
-                    )
-                    for instruction in instructions
+            with tqdm(total=len(instructions), desc="Tokenizing instructions...", disable=disable_tqdm) as bar:
+                instr_tokens = [
+                    self._tokenize(tokenizer=tokenizer, instruction=instr, bar=bar)
+                    for instr in instructions
                 ]
         else:
-            raise ValueError(
-                "Either instructions or tokenized instructions "
-                "must be provided."
-            )
+            raise ValueError("Either instructions or tokenized instructions must be provided.")
 
-        with tqdm(
-                total=len(instructions),
-                desc="Inference on base model...",
-                disable=disable_tqdm,
-        ) as bar:
+        logging.info("Running inference on base model...")
+        with tqdm(total=len(instr_tokens), desc="Inference on base model...", disable=disable_tqdm) as bar:
             encoded_responses = [
                 self._generate_new_tokens(
                     model=model,
-                    tokens=instr_token,
+                    tokens=t,
                     bar=bar,
                     n_generated_tokens=max_new_tokens,
                     streamer=TextStreamer(tokenizer) if stream else None,
+                    output_hidden_states=False,
                 )
-                for instr_token in instr_tokens
+                for t in instr_tokens
             ]
 
-        conversations: List[List[Dict[str, Any]]] = []
-        for enc_resp, instr in zip(encoded_responses, instructions):
-            conversations.append(
-                [
-                    {"role": "user", "content": instr},
-                    {
-                        "role": "assistant",
-                        "content": tokenizer.decode(
-                            enc_resp.sequences[0].tolist(),
-                            skip_special_tokens=True
-                        ),
-                    },
-                ]
-            )
+        conversations = []
+        for enc_resp, instr in zip(encoded_responses, instructions or []):
+            conversations.append([
+                {"role": "user", "content": instr},
+                {"role": "assistant", "content": tokenizer.decode(enc_resp.sequences[0].tolist(), skip_special_tokens=True)},
+            ])
 
         self.free_memory([instructions, encoded_responses])
+        gc.collect()
+        torch.cuda.empty_cache()
 
         return conversations
 
@@ -836,20 +730,14 @@ class Forge:
             raise ValueError("The scale factor must be between -1.0 and 1.0.")
 
         tensor_float32 = tensor.to(torch.float32)
-        refusal_dir_float32 = behaviour_dir.to(torch.float32)
+        behaviour_dir_float32 = behaviour_dir.to(torch.float32)
 
-        if refusal_dir_float32.dim() > 1:
-            refusal_dir_float32 = refusal_dir_float32.view(-1)
+        if behaviour_dir_float32.dim() > 1:
+            behaviour_dir_float32 = behaviour_dir_float32.view(-1)
 
-        tensor_float32 -= scale_factor * torch.matmul(
-            input=torch.outer(
-                input=refusal_dir_float32,
-                vec2=refusal_dir_float32,
-            ),
-            other=tensor_float32,
-        )
+        outer_dir = torch.outer(behaviour_dir_float32, behaviour_dir_float32)
+        tensor_float32 -= scale_factor * torch.matmul(outer_dir, tensor_float32)
         tensor_modified = tensor_float32.to(torch.bfloat16)
-
         return torch.nn.Parameter(tensor_modified)
 
     def save_model(
@@ -882,23 +770,18 @@ class Forge:
         if abs(scale_factor) > 1.0:
             raise ValueError("The scale factor must be between -1.0 and 1.0.")
         if not model_architecture:
-            logging.warning(
-                "No model architecture provided. Trying to identify the model architecture based on the layer names."
-            )
+            logging.warning("No model architecture provided. Trying to identify the model architecture automatically.")
             model_architecture = identify_model(model.model)
-        layer_names = get_layers_names_by_model(
-            model_architecture.lower()
-        )
+
+        layer_names = get_layers_names_by_model(model_architecture.lower())
         custom_model = model.model
 
         if min_layer is None:
             min_layer = max(int(len(model.model.layers) * 0.2), 2)
         if max_layer is None:
-            max_layer = min(
-                int(len(model.model.layers) * 0.8),
-                len(model.model.layers) - 3
-            )
+            max_layer = min(int(len(model.model.layers) * 0.8), len(model.model.layers) - 3)
 
+        model.eval()
         for layer_idx in trange(min_layer, max_layer, desc="Modifying model layers", disable=disable_tqdm):
             layer = custom_model.layers[layer_idx]
             for attr_path in layer_names.values():
@@ -912,26 +795,13 @@ class Forge:
                     behaviour_dir=behaviour_dir,
                     scale_factor=scale_factor,
                 )
-                setattr(
-                    target,
-                    parts[-1],
-                    torch.nn.Parameter(modified_weight)
-                )
+                setattr(target, parts[-1], modified_weight)
         if output_model_name:
-            model.save_pretrained(
-                output_model_name,
-                push_to_hub=to_hub,
-            )
+            model.save_pretrained(output_model_name, push_to_hub=to_hub)
             if tokenizer:
-                tokenizer.save_pretrained(
-                    output_model_name,
-                    push_to_hub=to_hub,
-                )
+                tokenizer.save_pretrained(output_model_name, push_to_hub=to_hub)
         else:
-            logging.warning(
-                "No output model name provided. Model not saved to disk nor pushed to hub."
-            )
-
+            logging.warning("No output model name provided. Model not saved to disk nor pushed to hub.")
         return model
 
     def free_memory(self, list_of_variables: List[Any]):
