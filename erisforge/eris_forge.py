@@ -637,7 +637,7 @@ class Forge:
                     for t in instr_tokens
                 ]
 
-        self.free_memory([new_model])
+        self.free_memory([new_model], silent=not disable_tqdm)
         gc.collect()
         torch.cuda.empty_cache()
 
@@ -804,13 +804,14 @@ class Forge:
             logging.warning("No output model name provided. Model not saved to disk nor pushed to hub.")
         return model
 
-    def free_memory(self, list_of_variables: List[Any]):
+    def free_memory(self, list_of_variables: List[Any], silent: bool = False) -> None:
         """
         Frees the memory.
         :param list_of_variables: List of variables to be deleted.
+        :param silent: Whether to print the warning message.
         :return: None
         """
-        logging.warning(f"Freeing memory for {len(list_of_variables)} variables.")
+        logging.warning(f"Freeing memory for {len(list_of_variables)} variables.") if not silent else None
         for var in list_of_variables:
             try:
                 del var
