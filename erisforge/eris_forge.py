@@ -406,7 +406,7 @@ class Forge:
         torch.cuda.empty_cache()
         logging.info("Freed Memory")
 
-        for layer_idx in trange(min_layer, max_layer, desc="Finding best direction", disable=disable_tqdm):
+        for layer_idx in trange(min_layer, max_layer, desc="Finding best direction", disable=disable_tqdm, colour="green"):
             start_time = time.time()
             logging.info(f"Computing objective_behaviour direction for layer: {layer_idx}")
             tmp_obj_beh_dir = self.compute_objective_behaviour_direction(
@@ -421,7 +421,7 @@ class Forge:
             conversations_ablated = []
             conversations_added = []
 
-            for batch_start in trange(0, len(eval_objective_behaviour_instructions), batch_size, desc="Ablation on objective_behaviour", disable=disable_tqdm):
+            for batch_start in trange(0, len(eval_objective_behaviour_instructions), batch_size, desc="Ablation on objective_behaviour", disable=disable_tqdm, colour="blue"):
                 batch_instructions = eval_objective_behaviour_instructions[batch_start:batch_start + batch_size]
                 conversations_ablated.extend(
                     self.run_forged_model(
@@ -441,7 +441,7 @@ class Forge:
                 torch.cuda.empty_cache()
 
             logging.info("Running inference on anti_objective_behaviour instructions (Added Model)...")
-            for batch_start in trange(0, len(eval_antiobjective_instructions), batch_size, desc="Addition on antiobjective", disable=disable_tqdm):
+            for batch_start in trange(0, len(eval_antiobjective_instructions), batch_size, desc="Addition on antiobjective", disable=disable_tqdm, colour="blue"):
                 batch_instructions = eval_antiobjective_instructions[batch_start:batch_start + batch_size]
                 conversations_added.extend(
                     self.run_forged_model(
