@@ -811,7 +811,7 @@ class Forge:
         :param silent: Whether to print the warning message.
         :return: None
         """
-        logging.warning(f"Freeing memory for {len(list_of_variables)} variables.") if not silent else None
+        logging.info(f"Freeing memory for {len(list_of_variables)} variables.") if not silent else None
         for var in list_of_variables:
             try:
                 del var
