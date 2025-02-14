@@ -14,6 +14,16 @@ from erisforge.eris_forge import (
 )
 
 
+class DummyCausalLM:
+    def to(self, device):
+        return self
+
+    def eval(self):
+        pass
+
+    def generate(self):
+        pass
+
 class TestForge(unittest.TestCase):
     def setUp(self):
         self.forge = Forge()
@@ -41,18 +51,21 @@ class TestForge(unittest.TestCase):
         self.assertEqual(len(tokenized_instructions["antiobjective_tokens"]), 1)
 
     @patch("erisforge.eris_forge.AutoModelForCausalLM.from_pretrained")
-    def test_compute_output(self, mock_model):
-        mock_model.return_value = self.model
+    def test_compute_output(self, mock_from_pretrained):
+        # Use the dummy class as the spec.
+        model_mock = MagicMock(spec=DummyCausalLM)
+        model_mock.to.return_value = model_mock  # Ensure .to() works
+        model_mock.eval.return_value = None  # Ensure .eval() works
+
+        mock_from_pretrained.return_value = model_mock
+
         tokenized_instructions = self.forge.tokenize_instructions(self.tokenizer)
         outputs = self.forge.compute_output(
-            model=self.model,
-            objective_behaviour_tokenized_instructions=tokenized_instructions[
-                "objective_behaviour_tokens"
-            ],
-            anti_behaviour_tokenized_instructions=tokenized_instructions[
-                "antiobjective_tokens"
-            ],
+            model=model_mock,
+            objective_behaviour_tokenized_instructions=tokenized_instructions["objective_behaviour_tokens"],
+            anti_behaviour_tokenized_instructions=tokenized_instructions["antiobjective_tokens"],
         )
+
         self.assertIn("obj_beh", outputs)
         self.assertIn("anti_obj", outputs)
         self.assertEqual(len(outputs["obj_beh"]), 1)
