@@ -514,18 +514,24 @@ class Forge:
         :return: Model with replaced layers.
         """
         for layer_idx in trange(min_layer, max_layer, desc="Replacing model layers", disable=disable_tqdm):
-            if isinstance(model.model.layers[layer_idx], (AblationDecoderLayer, AdditionDecoderLayer)):
-                model.model.layers[layer_idx] = new_layer(
-                    original_layer=model.model.layers[layer_idx].original_layer,
-                    direction=direction,
-                )
+            current_layer = model.model.layers[layer_idx]
+            if isinstance(current_layer, (AblationDecoderLayer, AdditionDecoderLayer)):
+                base_layer = current_layer.original_layer
             else:
-                model.model.layers[layer_idx] = new_layer(
-                    original_layer=model.model.layers[layer_idx],
-                    direction=direction,
-                )
-        return model
+                base_layer = current_layer
+            replaced_layer = new_layer(original_layer=base_layer, direction=direction)
+            for attr_name in dir(base_layer):
+                if attr_name.startswith("__"):
+                    continue
+                if not hasattr(replaced_layer, attr_name):
+                    try:
+                        setattr(replaced_layer, attr_name, getattr(base_layer, attr_name))
+                    except Exception:
+                        logging.error(f"Error setting attribute {attr_name} on layer {layer_idx}")
+                        pass
 
+            model.model.layers[layer_idx] = replaced_layer
+        return model
     def compute_objective_behaviour_direction(
             self,
             model: AutoModelForCausalLM | PreTrainedModel,

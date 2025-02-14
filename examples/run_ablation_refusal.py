@@ -257,6 +257,9 @@ def main():
     # -------------------------------------------------------------------------
     # Save the transformed model.
     print("\nSaving the transformed (corrupted) model...")
+    model = AutoModelForCausalLM.from_pretrained(
+            args.model, trust_remote_code=True, torch_dtype=torch.bfloat16
+        ).to(forge.device)
     forge.save_model(
         model=model,
         tokenizer=tokenizer,
