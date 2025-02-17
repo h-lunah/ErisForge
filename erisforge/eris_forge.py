@@ -719,8 +719,8 @@ class Forge:
 
         return conversations
 
-    @staticmethod
     def _modify_tensor(
+            self,
             tensor: Tensor,
             behaviour_dir: Tensor,
             scale_factor: float = 1.0,
@@ -735,8 +735,8 @@ class Forge:
         if abs(scale_factor) > 1.0:
             raise ValueError("The scale factor must be between -1.0 and 1.0.")
 
-        tensor_float32 = tensor.to(torch.float32)
-        behaviour_dir_float32 = behaviour_dir.to(torch.float32)
+        tensor_float32 = tensor.to(torch.float32).to(self.device)
+        behaviour_dir_float32 = behaviour_dir.to(torch.float32).to(self.device)
 
         if behaviour_dir_float32.dim() > 1:
             behaviour_dir_float32 = behaviour_dir_float32.view(-1)
