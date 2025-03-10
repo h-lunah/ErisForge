@@ -10,7 +10,7 @@ authors = [
 ]
 description = "Library for layer ablation/addition of LLM models"
 readme = "README.md"
-requires-python = ">=3.11"
+# requires-python = ">=3.11"
 dynamic = ["dependencies"]
 classifiers = [
     "Programming Language :: Python :: 3",
